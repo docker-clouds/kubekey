@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/asaskevich/govalidator"
 	"github.com/cockroachdb/errors"
@@ -161,6 +162,84 @@ type imageArgs struct {
 	dest      string         // optional: destination image reference (local or remote)
 	policy    string         // optional: policy for image copy, default is strict
 	logOutput io.Writer      // optional: output writer for module logs
+}
+
+// contentLengthTolerantSource wraps a *remote.Repository to bypass Content-Length
+// validation errors. When Fetch encounters a "mismatch Content-Length" error from
+// the registry (common with quay.io CDN for large blobs), it falls back to
+// FetchReference, which does not validate Content-Length against the descriptor size.
+//
+// This addresses the known issue where some registry CDNs return inconsistent
+// Content-Length headers. Data integrity is guaranteed by the SHA256 digest
+// embedded in each blob's address, not by Content-Length.
+type contentLengthTolerantSource struct {
+	*remote.Repository
+}
+
+// Fetch overrides the embedded Repository.Fetch to fall back to FetchReference
+// on Content-Length mismatch errors.
+func (c *contentLengthTolerantSource) Fetch(ctx context.Context, target ocispec.Descriptor) (io.ReadCloser, error) {
+	rc, err := c.Repository.Fetch(ctx, target)
+	if err == nil {
+		return rc, nil
+	}
+	// Only fall back for Content-Length mismatch errors
+	if !strings.Contains(err.Error(), "mismatch Content-Length") {
+		return nil, err
+	}
+	klog.V(2).InfoS("bypassing Content-Length validation, falling back to FetchReference",
+		"digest", target.Digest, "expectedSize", target.Size)
+	// Try blob endpoint first (most fetched content during Copy is blobs/layers)
+	_, blobRC, blobErr := c.Repository.Blobs().FetchReference(ctx, target.Digest.String())
+	if blobErr == nil {
+		return blobRC, nil
+	}
+	// Try manifest endpoint (for manifest content)
+	_, manifestRC, manifestErr := c.Repository.FetchReference(ctx, target.Digest.String())
+	if manifestErr != nil {
+		return nil, errors.Wrapf(err,
+			"FetchReference fallback also failed (blob endpoint: %v, manifest endpoint: %v)",
+			blobErr, manifestErr)
+	}
+	return manifestRC, nil
+}
+
+// copyWithRetry wraps oras.Copy with retry logic. On the final attempt,
+// it wraps the source repository with contentLengthTolerantSource to bypass
+// Content-Length validation, which is a known issue with some registry CDNs
+// (e.g., quay.io) that return inconsistent Content-Length headers for large blobs.
+func copyWithRetry(ctx context.Context, src, dst *remote.Repository, srcRef, dstRef string, opts oras.CopyOptions) error {
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt*attempt) * time.Second
+			klog.V(2).InfoS("retrying image copy",
+				"attempt", attempt+1, "maxRetries", maxRetries,
+				"backoff", backoff.String(), "reference", srcRef)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		// On the last attempt, bypass Content-Length validation
+		var copySrc oras.ReadOnlyTarget = src
+		if attempt == maxRetries-1 {
+			copySrc = &contentLengthTolerantSource{Repository: src}
+		}
+
+		_, err := oras.Copy(ctx, copySrc, srcRef, dst, dstRef, opts)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		klog.V(2).InfoS("image copy attempt failed",
+			"attempt", attempt+1, "maxRetries", maxRetries,
+			"reference", srcRef, "error", err)
+	}
+	return errors.Wrapf(lastErr, "failed after %d attempts", maxRetries)
 }
 
 // newImageArgs creates a new imageArgs instance from raw configuration.
@@ -298,8 +377,8 @@ func (i *imageArgs) copy(ctx context.Context, hostVars map[string]any) error {
 				return err
 			}
 		} else {
-			// Original copy (all platforms)
-			if _, err := oras.Copy(ctx, srcRepo, srcRepo.Reference.Reference, dstRepo, dstRepo.Reference.Reference, oras.DefaultCopyOptions); err != nil {
+			// Original copy (all platforms) with retry
+			if err := copyWithRetry(ctx, srcRepo, dstRepo, srcRepo.Reference.Reference, dstRepo.Reference.Reference, oras.DefaultCopyOptions); err != nil {
 				return errors.Wrapf(err, "failed to copy image %q", img)
 			}
 		}
@@ -437,9 +516,9 @@ func (i *imageArgs) copyWithPlatformFilter(ctx context.Context, src, dst *remote
 				continue
 			}
 
-			// Copy this platform's image content
+			// Copy this platform's image content with retry
 			// oras.Copy will push the manifest for this platform as well
-			_, err = oras.Copy(ctx, src, digestStr, dst, digestStr, oras.DefaultCopyOptions)
+			err = copyWithRetry(ctx, src, dst, digestStr, digestStr, oras.DefaultCopyOptions)
 			if err != nil {
 				return errors.Wrapf(err, "failed to copy platform image")
 			}
@@ -514,8 +593,8 @@ func (i *imageArgs) copyWithPlatformFilter(ctx context.Context, src, dst *remote
 			}
 		}
 
-		// Copy the single platform image
-		_, err = oras.Copy(ctx, src, src.Reference.Reference, dst, dst.Reference.Reference, oras.DefaultCopyOptions)
+		// Copy the single platform image with retry
+		err = copyWithRetry(ctx, src, dst, src.Reference.Reference, dst.Reference.Reference, oras.DefaultCopyOptions)
 		if err != nil {
 			return errors.Wrapf(err, "failed to copy image %q", img)
 		}
