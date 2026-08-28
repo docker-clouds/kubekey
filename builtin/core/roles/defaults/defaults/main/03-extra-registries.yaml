@@ -1,0 +1,20 @@
+# volcorch 额外 containerd registry — 空默认（仅 schema 声明，勿在此写站点数据）
+#
+# 真实数据源: runtime/clusters/<cluster>/extra-registries.yaml（挂载卷，gitignore 外）
+# 注入链路: scripts/lib/kk-run-config.sh 将站点文件经 yq load 并入 kk config 的
+#   spec.extra_registries → kk 将 config spec 以最高优先级合入模板 vars →
+#   cri/containerd normalize 任务（main.yaml）渲染进 /etc/containerd/config.toml
+#   的 volcorch-managed 块。本文件的空列表仅在该链路未注入时兜底。
+#
+# 事故背景（2026-08，详见 docs/troubleshooting.md #20）：8090 私仓 mirror 曾靠手工
+# 编辑 config.toml 维持，与 kk 重渲染互相覆盖；手工配置中 ascend 段格式错误导致
+# vNPU 硬切失效 7 天。本机制是"手工编辑"的版本化替代。
+#
+# ⚠ 重要：绕过 cluster-create.sh/node-add.sh 直接调 kk 不会注入站点数据，此空默认
+#   会生效，已部署节点的 mirror 将在 config 重渲染时被剥离。始终通过脚本部署。
+#
+# 字段（每项）：
+#   registry             host[:port]，同时用作 mirror key 和 TLS 配置 key
+#   endpoint             mirror endpoint；缺省为 http://<registry>
+#   insecure_skip_verify true 时为该 registry 注入 insecure_skip_verify（HTTP/自签仓库）
+extra_registries: []

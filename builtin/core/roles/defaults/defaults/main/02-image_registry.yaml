@@ -38,7 +38,7 @@ image_registry:
       Harbor12345
       {{- end }}
     skip_tls_verify: >-
-      {{- .image_registry.type | empty -}}
+      {{- or (.image_registry.type | empty) (eq .image_registry.type "docker-registry") -}}
     ca_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
       {{ .binary_dir }}/pki/root.crt
