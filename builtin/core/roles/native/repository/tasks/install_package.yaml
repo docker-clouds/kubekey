@@ -12,7 +12,7 @@
 - name: Repository | Initialize Debian-based repository and install required system packages
   command: |
     now=$(date +"%Y%m%d%H%M%S")
-    PKGS="socat conntrack ipset ebtables chrony ipvsadm{{ if .groups.nfs | default list | has .inventory_hostname }} nfs-kernel-server{{ end }}"
+    PKGS="socat conntrack ipset ebtables chrony ipvsadm nfs-common"
     PKGS_TO_INSTALL=""
     for pkg in $PKGS; do
       if [ -n "$pkg" ]; then
@@ -36,9 +36,8 @@
           ipvsadm)
             ipvsadm -Ln >/dev/null 2>&1 || PKGS_TO_INSTALL="$PKGS_TO_INSTALL ipvsadm"
             ;;
-          nfs-kernel-server)
-            [ "$(systemctl show -p LoadState --value nfs-server.service 2>/dev/null)" = "loaded" ] \
-              || PKGS_TO_INSTALL="$PKGS_TO_INSTALL nfs-kernel-server"
+          nfs-common)
+            [ -f /sbin/mount.nfs ] || PKGS_TO_INSTALL="$PKGS_TO_INSTALL nfs-common"
             ;;
         esac
       fi
@@ -73,7 +72,7 @@
 - name: Repository | Initialize RHEL-based repository and install required system packages
   command: |
     BACKUP_FILE="/etc/yum.repos.d.kubekey.bak-$(date +%Y%m%d%H%M%S)"
-    PKGS="socat conntrack ipset ebtables chrony ipvsadm{{ if .groups.nfs | default list | has .inventory_hostname }} nfs-kernel-server{{ end }}"
+    PKGS="socat conntrack ipset ebtables chrony ipvsadm nfs-utils"
     PKGS_TO_INSTALL=""
     for pkg in $PKGS; do
       if [ -n "$pkg" ]; then
@@ -97,11 +96,10 @@
           ipvsadm)
             ipvsadm -Ln >/dev/null 2>&1 || PKGS_TO_INSTALL="$PKGS_TO_INSTALL ipvsadm"
             ;;
-          nfs-kernel-server)
-            [ "$(systemctl show -p LoadState --value nfs-server.service 2>/dev/null)" = "loaded" ] \
-              || PKGS_TO_INSTALL="$PKGS_TO_INSTALL nfs-kernel-server"
+          nfs-utils)
+            rpm -q nfs-utils >/dev/null 2>&1 || PKGS_TO_INSTALL="$PKGS_TO_INSTALL nfs-utils"
             ;;
-        esac      
+        esac
       fi
     done
     if [ -f "{{ .tmp_dir }}/repository.iso" ]; then

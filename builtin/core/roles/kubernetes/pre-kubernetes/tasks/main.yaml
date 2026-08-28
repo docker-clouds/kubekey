@@ -19,7 +19,7 @@
     - {path: "/usr/local/bin/kube-scripts", chown: "/usr/local/bin/kube-scripts"}
     - {path: "/usr/libexec/kubernetes/kubelet-plugins/volume/exec", chown: "/usr/libexec/kubernetes"}
     - {path: "/etc/cni/net.d", chown: "/etc/cni"}
-    # - {path: "/opt/cni/bin", chown: "/opt/cni"}
+    - {path: "/opt/cni/bin", chown: "/opt/cni"}
     # - {path: "/var/lib/calico", chown: "/var/lib/calico"}
 
 - name: PreKubernetes | Synchronize audit policy file to remote node
