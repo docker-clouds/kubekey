@@ -127,7 +127,7 @@
 #     - Control plane: 127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
 #     - Worker:        {{ .kubernetes.control_plane_endpoint.kube_vip.address }} {{ .kubernetes.control_plane_endpoint.host }}
 #
-# For 'haproxy' endpoint type:
+# For 'haproxy' endpoint type:  [volcorch patch — fix CP-node join connectivity]
 #   Before cluster initialization:
 #     - Control plane: 127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
 #     - Worker:        127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
@@ -135,8 +135,12 @@
 #     - Control plane: 127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
 #     - Worker:        127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
 #   Before joining cluster:
-#     - Control plane: {{ .init_kubernetes_node }} {{ .kubernetes.control_plane_endpoint.host }}
-#     - Worker:        {{ .init_kubernetes_node }} {{ .kubernetes.control_plane_endpoint.host }}
+#     - Control plane (joining): {{ .init_kubernetes_node }} {{ .kubernetes.control_plane_endpoint.host }}
+#       (upstream bug: wrote 127.0.0.1 which has no listener on a joining CP node —
+#        haproxy static pod only runs on pure workers, and the joining CP node has
+#        no local apiserver yet. kubeadm join times out fetching cluster-info.)
+#     - Worker:        127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
+#       (local haproxy static pod is deployed by pre-kubernetes before join)
 #   After joining cluster:
 #     - Control plane: 127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
 #     - Worker:        127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
@@ -154,6 +158,13 @@
     # kubekey kubernetes control_plane_endpoint BEGIN
     {{- if .kubernetes.control_plane_endpoint.type | eq "kube-vip" }}
     {{ .kubernetes.control_plane_endpoint.kube_vip.address }} {{ .kubernetes.control_plane_endpoint.host }}
+    {{- else if and (.groups.kube_control_plane | default list | has .inventory_hostname) (.init_kubernetes_node | ne .inventory_hostname) }}
+    {{- if and (.kubernetes_install_LoadState.stdout | eq "not-found") (index .hostvars .init_kubernetes_node "internal_ipv4" | empty | not) }}
+    {{ index .hostvars .init_kubernetes_node "internal_ipv4" }} {{ .kubernetes.control_plane_endpoint.host }}
+    {{- else }}
+    127.0.0.1 {{ .kubernetes.control_plane_endpoint.host }}
+    ::1 {{ .kubernetes.control_plane_endpoint.host }}
+    {{- end }}
     {{- else if and (.kubernetes.control_plane_endpoint.type | eq "local") (.kubernetes.control_plane_endpoint.local.address | empty | not) }}
     {{ .kubernetes.control_plane_endpoint.local.address }} {{ .kubernetes.control_plane_endpoint.host }}
     {{- else }}
