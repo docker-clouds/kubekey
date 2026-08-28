@@ -68,6 +68,72 @@
       template:
         src: config.toml
         dest: /etc/containerd/config.toml
+    # ── volcorch 规范化：ascend runtime + 额外 registry（数据源: config spec
+    #    .extra_registries，由部署侧脚本从站点文件注入；
+    #    空默认兜底在 defaults/main/03-extra-registries.yaml）──
+    # 设计约束（勿改回"存在即跳过"式的幂等检查）：
+    #   - 任意位置、任意格式的既有 ascend 段一律删除后重写（自愈手工编辑产生的错误格式，
+    #     典型事故：BinaryName 放在段顶层而非 options 下，containerd 静默忽略导致 vNPU 硬切失效）
+    #   - 与声明 registry 重复的 mirror/tls 表一并删除（防止 TOML 重复定义使 containerd 拒绝启动）
+    #   - 全部改动收在 # BEGIN/END volcorch-managed 标记块内，备份写入 config.toml.volcorch-bak
+    #   - 重启后用 `containerd config dump` 校验生效配置，不通过则整个 play 失败（fail-fast）
+    - name: Containerd | Normalize config.toml (ascend runtime + extra registries)
+      command: |
+        set -e
+        CFG=/etc/containerd/config.toml
+        cp "$CFG" "$CFG.volcorch-bak"
+        awk '/^# BEGIN volcorch-managed$/,/^# END volcorch-managed$/ {next} {print}' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+        awk '/^[ \t]*$/{tail = tail $0 "\n"; next} {printf "%s", tail; tail = ""; print}' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+        awk -v REGS='{{ range .extra_registries | default list }}{{ .registry }} {{ end }}' '
+        BEGIN {
+          skip = 0; buf = ""
+          n = split(REGS, arr, " ")
+          for (i = 1; i <= n; i++) {
+            m1[i] = "[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"" arr[i] "\"]"
+            m2[i] = "[plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"" arr[i] "\""
+          }
+        }
+        function flushbuf() { printf "%s", buf; buf = "" }
+        {
+          if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) { buf = buf $0 "\n"; next }
+          if ($0 ~ /^[ \t]*\[/) {
+            drop = (index($0, ".runtimes.ascend]") > 0 || index($0, ".runtimes.ascend.") > 0)
+            if (!drop) for (i = 1; i <= n; i++) if (index($0, m1[i]) > 0 || index($0, m2[i]) > 0) { drop = 1; break }
+            if (drop) { buf = ""; skip = 1; next }
+            flushbuf(); printf "%s\n", $0; skip = 0; next
+          }
+          flushbuf()
+          if (!skip) printf "%s\n", $0
+        }
+        END { flushbuf() }' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+        cat >> "$CFG" <<'VOLCORCH_EOF'
+
+        # BEGIN volcorch-managed
+        # volcorch-managed CRI config. DO NOT edit manually - redeploy normalizes this block.
+        # Declare registries in runtime/clusters/<cluster>/extra-registries.yaml (site volume).
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.ascend]
+          runtime_type = "io.containerd.runc.v2"
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.ascend.options]
+            BinaryName = "/usr/local/bin/ascend-docker-runtime"
+            SystemdCgroup = true
+        {{- range .extra_registries | default list }}
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{ .registry }}"]
+          endpoint = ["{{ .endpoint | default (printf "http://%s" .registry) }}"]
+        {{- if .insecure_skip_verify }}
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ .registry }}".tls]
+          insecure_skip_verify = true
+        {{- end }}
+        {{- end }}
+        # END volcorch-managed
+        VOLCORCH_EOF
+    - name: Containerd | Ensure ascend-docker-runtime symlink when driver is present
+      command: |
+        if [ -x /usr/local/Ascend/Ascend-Docker-Runtime/ascend-docker-runtime ]; then
+          ln -sf /usr/local/Ascend/Ascend-Docker-Runtime/ascend-docker-runtime /usr/local/bin/ascend-docker-runtime
+          echo "symlink ensured: /usr/local/bin/ascend-docker-runtime"
+        else
+          echo "skip: Ascend driver not present on this node"
+        fi
 - name: Containerd | Deploy the containerd systemd service file
   when: or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
   copy:
@@ -77,3 +143,11 @@
   when: or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
   command: |
     systemctl daemon-reload && systemctl restart containerd.service && systemctl enable containerd.service
+- name: Containerd | Fail fast unless ascend runtime is effective in dumped config
+  when: or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
+  command: |
+    if ! containerd config dump 2>/dev/null | awk '/runtimes\.ascend\.options\]/{f=1; next} f && /^\[/{f=0} f && /BinaryName/{ok=1} END{exit(ok?0:1)}'; then
+      echo "FATAL: effective containerd config lacks BinaryName under runtimes.ascend.options."
+      echo "       /etc/containerd/config.toml was likely hand-edited; backup at /etc/containerd/config.toml.volcorch-bak"
+      exit 1
+    fi
