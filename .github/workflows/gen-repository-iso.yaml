@@ -15,6 +15,9 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: write
+
 jobs:
   update-tag:
     name: Update iso-latest Tag
@@ -28,14 +31,14 @@ jobs:
         shell: bash
         run: |
           CURRENT_TAG_SHA=$(git rev-parse iso-latest 2>/dev/null || echo "")
-          LATEST_MAIN_SHA=$(git rev-parse origin/main)
+          LATEST_COMMIT_SHA=$(git rev-parse HEAD)
 
-          if [ "$CURRENT_TAG_SHA" = "$LATEST_MAIN_SHA" ]; then
+          if [ "$CURRENT_TAG_SHA" = "$LATEST_COMMIT_SHA" ]; then
             echo "Tag is already up-to-date, skipping update"
           else
-            echo "Updating iso-latest tag to latest main commit ($LATEST_MAIN_SHA)"
+            echo "Updating iso-latest tag to current commit ($LATEST_COMMIT_SHA)"
             git tag -d iso-latest 2>/dev/null || true
-            git tag -f iso-latest origin/main
+            git tag -f iso-latest HEAD
             git push origin :refs/tags/iso-latest 2>/dev/null || true
             git push origin --tags
           fi
