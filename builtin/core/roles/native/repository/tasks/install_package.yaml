@@ -12,7 +12,7 @@
 - name: Repository | Initialize Debian-based repository and install required system packages
   command: |
     now=$(date +"%Y%m%d%H%M%S")
-    PKGS="socat conntrack ipset ebtables chrony ipvsadm nfs-common nfs-kernel-server gcc make pciutils linux-headers-$(uname -r)"
+    PKGS="socat conntrack ipset ebtables chrony ipvsadm nfs-common nfs-kernel-server gcc make pciutils"
     PKGS_TO_INSTALL=""
     for pkg in $PKGS; do
       if [ -n "$pkg" ]; then
@@ -51,10 +51,6 @@
             ;;
           pciutils)
             command -v lspci >/dev/null 2>&1 || PKGS_TO_INSTALL="$PKGS_TO_INSTALL pciutils"
-            ;;
-          linux-headers-*)
-            dpkg-query -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed" \
-              || PKGS_TO_INSTALL="$PKGS_TO_INSTALL $pkg"
             ;;
         esac
       fi
