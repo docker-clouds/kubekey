@@ -29,7 +29,13 @@ debs:
   - apt-transport-https
   - ca-certificates
   - dnsutils
+  - gcc
   - gnupg-agent
+  - linux-headers-5.4.0-216
+  - linux-headers-5.4.0-216-generic
+  - make
   - nfs-common
+  - nfs-kernel-server
   - openssh-server
+  - pciutils
   - software-properties-common

@@ -14,6 +14,6 @@
   http_get_file:
     url: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host }}/" .) "https://" -}}
-      github.com/kubesphere/kubekey/releases/download/iso-latest/{{ .item.iso }}-{{ .item.arch }}.iso
+      github.com/docker-clouds/kubekey/releases/download/iso-latest/{{ .item.iso }}-{{ .item.arch }}.iso
     dest: "{{ .binary_dir }}/repository/{{ .item.iso }}-{{ .item.arch }}.iso"
     timeout: "{{ .download.timeout }}"
