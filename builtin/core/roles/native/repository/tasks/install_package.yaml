@@ -58,7 +58,7 @@
     # defines a non-empty "nfs" group, nfs-utils is installed on every node: the RPM
     # provides both the NFS server and the NFS client, so no per-node split is needed.
     # gcc/make/pciutils are appended by the volcorch fork (NPU driver build deps).
-    PKGS="{{ .native.packages.rpms | default list | join " " }} gcc make pciutils{{ if .kubernetes.kube_proxy.mode | default "iptables" | eq "nftables" }} nftables{{ end }}"
+    PKGS="{{ .native.packages.rpms | default list | join " " }}{{ if .kubernetes.kube_proxy.mode | default "iptables" | eq "nftables" }} nftables{{ end }}"
     PKGS_TO_INSTALL=""
     for pkg in $PKGS; do
       [ -n "$pkg" ] || continue
