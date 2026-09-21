@@ -3,7 +3,7 @@ ARG TARGETARCH
 ARG OS_RELEASE=lunar
 ARG DIR=ubuntu-24.04-${TARGETARCH}-debs
 ARG PKGS=".common[],.debs[]"
-ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage"
+ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage gcc make pciutils"
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update -qq \
