@@ -6,10 +6,12 @@ ARG PKGS=".common[],.debs[]"
 ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage"
 ENV DEBIAN_FRONTEND=noninteractive
 
-# dump system package list
-RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
 RUN apt update -qq \
-    && apt install -y --no-install-recommends $BUILD_TOOLS 
+    && apt upgrade -y \
+    && apt install -y --no-install-recommends $BUILD_TOOLS
+
+# dump AFTER upgrade so registered versions match the archive versions fetched below
+RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
     
 WORKDIR /package
 COPY packages.yaml .

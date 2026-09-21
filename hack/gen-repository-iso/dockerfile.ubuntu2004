@@ -7,10 +7,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
-
 RUN apt update -qq \
+    && apt upgrade -y \
     && apt install -y --no-install-recommends $BUILD_TOOLS
+
+# dump AFTER upgrade so registered versions match the archive versions fetched below
+RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
 
 WORKDIR /package
 COPY packages.yaml .
