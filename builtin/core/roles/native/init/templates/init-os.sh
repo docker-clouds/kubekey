@@ -149,6 +149,15 @@ mv $tmpfile /etc/sysctl.conf
 # ------------------------ 4. Security Limit ------------------------------------
 
 # ulimit
+# NOTE: the settings below are written to /etc/security/limits.d/99-kube.conf,
+# which is a PAM mechanism. They ONLY take effect for login sessions (SSH,
+# console, su, cron) and processes started from such sessions.
+# systemd-managed services (containerd, kubelet, kube-proxy, ...) IGNORE these
+# values; they are governed by the LimitNOFILE=/LimitNPROC= directives in their
+# own unit files (or the systemd default). Therefore these limits do NOT
+# propagate into containers, and changing them will NOT affect in-container
+# processes such as compute-server. To adjust the file-descriptor limit that
+# containers inherit, modify the container runtime's systemd unit instead.
 cat << 'EOF' | tee /etc/security/limits.d/99-kube.conf
 * soft nofile 1048576
 * hard nofile 1048576
@@ -219,8 +228,15 @@ sysctl -p
 
 for dnsFile in {{ .native.localDNS | join " " }}; do
    sed -i '/# kubekey hosts BEGIN/,/# kubekey hosts END/d' $dnsFile
+   # During a cluster upgrade the control_plane_endpoint DNS must NOT be touched:
+   # it is already correct from the create pipeline (control plane -> 127.0.0.1,
+   # worker -> init_kubernetes_node real IP). Deleting the block here would leave
+   # every node with no resolvable control_plane_endpoint, breaking
+   # 'kubeadm upgrade node' on workers (single-APIServer topology).
+   {{- if not (.upgrade.kubernetes | default false) }}
    sed -i '/# kubekey kubernetes control_plane_endpoint BEGIN/,/# kubekey kubernetes control_plane_endpoint END/d' $dnsFile
    sed -i '/# kubekey image_registry control_plane_endpoint BEGIN/,/# kubekey image_registry control_plane_endpoint END/d' $dnsFile
+   {{- end }}
    awk 'NF{blank=0} !NF{blank++} blank<2' $dnsFile > tmp && mv tmp $dnsFile
 
    cat >>$dnsFile<<EOF

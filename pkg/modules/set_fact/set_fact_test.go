@@ -25,29 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/klog/v2"
 
-	_const "github.com/kubesphere/kubekey/v4/pkg/const"
 	"github.com/kubesphere/kubekey/v4/pkg/modules/internal"
+	testutil "github.com/kubesphere/kubekey/v4/pkg/modules/testutil"
 	"github.com/kubesphere/kubekey/v4/pkg/variable"
-	"github.com/kubesphere/kubekey/v4/pkg/variable/source"
 )
-
-// NewTestVariable creates a new variable.Variable for testing purposes.
-func NewTestVariable(hosts []string, vars map[string]any) variable.Variable {
-	client, playbook, err := _const.NewTestPlaybook(hosts)
-	if err != nil {
-		klog.ErrorS(err, "failed to create test playbook")
-	}
-	v, err := variable.New(context.TODO(), client, *playbook, source.MemorySource)
-	if err != nil {
-		klog.ErrorS(err, "failed to create variable")
-	}
-	if err := v.Merge(variable.MergeRemoteVariable(vars, hosts...)); err != nil {
-		klog.ErrorS(err, "failed to merge variable")
-	}
-	return v
-}
 
 // createRawArgs creates a runtime.RawExtension from a map
 func createRawArgs(data map[string]any) runtime.RawExtension {
@@ -230,7 +212,7 @@ func TestSetFactModule(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			testVar := NewTestVariable(tc.hosts, tc.initialVars)
+			testVar := testutil.NewTestVariable(tc.hosts, tc.initialVars)
 
 			opt := internal.ExecOptions{
 				Host:     tc.hosts[0],
@@ -259,4 +241,55 @@ func TestSetFactModule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSetFactDownloadArchFromHostvars reproduces the download role's
+// "Include actual host architectures in the download list" task: download.arch
+// defaults to ["amd64"], so on an arm64-only cluster the required binaries are
+// never fetched unless the actual host architectures (gathered via .hostvars)
+// are folded in.
+func TestSetFactDownloadArchFromHostvars(t *testing.T) {
+	ctx := context.Background()
+	hosts := []string{"localhost", "node-amd64", "node-arm64"}
+	testVar := testutil.NewTestVariable(hosts, map[string]any{
+		"download": map[string]any{"arch": []any{"amd64"}},
+	})
+
+	for host, arch := range map[string]string{"node-amd64": "amd64", "node-arm64": "arm64"} {
+		_, _, err := ModuleSetFact(ctx, internal.ExecOptions{
+			Host:     host,
+			Variable: testVar,
+			Args:     createRawArgs(map[string]any{"binary_type": arch}),
+		})
+		require.NoError(t, err)
+	}
+
+	args := createRawArgs(map[string]any{
+		"download": map[string]any{
+			"arch": "{{- $archs := .download.arch -}}\n" +
+				"{{- range $.hostvars }}\n" +
+				"  {{- if .binary_type }}\n" +
+				"    {{- $archs = append $archs .binary_type }}\n" +
+				"  {{- end }}\n" +
+				"{{- end }}\n" +
+				"{{- $archs | uniq | toJson }}",
+		},
+	})
+
+	stdout, stderr, err := ModuleSetFact(ctx, internal.ExecOptions{
+		Host:     "localhost",
+		Variable: testVar,
+		Args:     args,
+	})
+	require.NoError(t, err)
+	require.Equal(t, internal.StdoutSuccess, stdout)
+	require.Empty(t, stderr)
+
+	result, err := testVar.Get(variable.GetAllVariable("localhost"))
+	require.NoError(t, err)
+	hostVars, ok := result.(map[string]any)
+	require.True(t, ok)
+	download, ok := hostVars["download"].(map[string]any)
+	require.True(t, ok)
+	require.ElementsMatch(t, []any{"amd64", "arm64"}, download["arch"])
 }

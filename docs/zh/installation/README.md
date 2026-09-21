@@ -3,7 +3,7 @@
 本文档介绍如何使用 KubeKey 安装 Kubernetes 集群。
 
 - 支持部署环境：Linux 发行版
-- 支持的 Kubernetes 版本：v1.23.x ~ v1.34.x
+- 支持的 Kubernetes 版本：v1.23.x ~ v1.37.x
 
 ## 系统要求
 
@@ -16,7 +16,10 @@
 
 Kubernetes 要求操作系统预装以下依赖：
 
-`socat` `conntrack` `ipset` `ebtables` `chrony` `ipvsadm`
+- Debian/Ubuntu：`socat` `conntrack` `ipset` `ebtables` `chrony` `ipvsadm`
+- RHEL/CentOS：`socat` `conntrack-tools` `ipset` `ebtables` `chrony` `ipvsadm`
+
+KubeKey 会在节点初始化时自动安装上述软件包。如需自定义清单，可在配置文件中设置 `native.packages.debs` 或 `native.packages.rpms`，参见[配置参考](../reference/config.md)。
 
 KubeKey 已为部分 Linux 发行版制作了预编译的依赖包，可在 [iso-latest](https://github.com/kubesphere/kubekey/releases/tag/iso-latest) 获取。
 支持的具体发行版与构建方式详见 [依赖包管理](../dependency-packages/README.md)。
@@ -84,6 +87,8 @@ spec:
 
 节点磁盘格式化与 multipath 配置见 [存储与 Multipath 配置](../reference/storage.md)。
 
+如果你已有 v3（v1alpha2）版本的集群配置，可使用 `kk create convert` 将其迁移为 v4 的 `inventory.yaml` 与 `config.yaml`。完整的字段映射见 [将 v3 配置迁移到 v4](../reference/config-migration.md)。
+
 ## 定义关键配置信息
 
 KubeKey 使用 `Config` 资源来定义集群的关键配置信息。
@@ -103,6 +108,9 @@ KubeKey 使用 `Config` 资源来定义集群的关键配置信息。
 - [安装 v1.32.x 版本的 Kubernetes 配置](../../../builtin/core/defaults/config/v1.32.yaml)
 - [安装 v1.33.x 版本的 Kubernetes 配置](../../../builtin/core/defaults/config/v1.33.yaml)
 - [安装 v1.34.x 版本的 Kubernetes 配置](../../../builtin/core/defaults/config/v1.34.yaml)
+- [安装 v1.35.x 版本的 Kubernetes 配置](../../../builtin/core/defaults/config/v1.35.yaml)
+- [安装 v1.36.x 版本的 Kubernetes 配置](../../../builtin/core/defaults/config/v1.36.yaml)
+- [安装 v1.37.x 版本的 Kubernetes 配置](../../../builtin/core/defaults/config/v1.37.yaml)
 
 完整配置参考[配置参考](../reference/config.md)。
 
@@ -126,6 +134,7 @@ KubeKey 支持**在线安装**和**离线安装**两种方式。
 
 - **添加节点**：向已有 Kubernetes 集群添加新的控制平面节点、工作节点或 etcd 节点。详细步骤请参考 [添加集群节点](add-nodes.md)。
 - **删除节点**：从 Kubernetes 集群中安全移除指定节点。详细步骤请参考 [删除集群节点](delete-nodes.md)。
+- **升级集群**：升级已有集群的 Kubernetes 版本，并可选择升级 etcd、容器运行时、CNI 插件和 StorageClass 存储插件。详细步骤请参考 [升级集群](upgrade-cluster.md)。
 
 ## 启用 kubectl 自动补全
 

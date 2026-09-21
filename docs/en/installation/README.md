@@ -3,7 +3,7 @@
 This document explains how to install a Kubernetes cluster using KubeKey.
 
 - Supported deployment environments: Linux distributions
-- Supported Kubernetes versions: v1.23.x ~ v1.34.x
+- Supported Kubernetes versions: v1.23.x ~ v1.37.x
 
 ## System Requirements
 
@@ -16,7 +16,10 @@ This document explains how to install a Kubernetes cluster using KubeKey.
 
 Kubernetes requires the following OS dependencies to be pre-installed:
 
-`socat` `conntrack` `ipset` `ebtables` `chrony` `ipvsadm`
+- Debian/Ubuntu: `socat` `conntrack` `ipset` `ebtables` `chrony` `ipvsadm`
+- RHEL/CentOS: `socat` `conntrack-tools` `ipset` `ebtables` `chrony` `ipvsadm`
+
+KubeKey installs these packages automatically during node initialization. To customize the lists, set `native.packages.debs` or `native.packages.rpms` in the config file; see [Config Reference](../reference/config.md).
 
 KubeKey provides pre-compiled dependency packages for some Linux distributions, available at [iso-latest](https://github.com/kubesphere/kubekey/releases/tag/iso-latest).
 For supported distributions and build methods, see [Dependency Packages](../dependency-packages/README.md).
@@ -85,6 +88,8 @@ spec:
 
 For disk formatting and multipath settings, see [Storage and Multipath Configuration](../reference/storage.md).
 
+If you have an existing v3 (v1alpha2) cluster configuration, use `kk create convert` to migrate it to v4 `inventory.yaml` and `config.yaml`. See [Migrate a v3 Configuration to v4](../reference/config-migration.md) for the full field mapping.
+
 ## Define Key Configuration
 
 KubeKey uses the `Config` resource to define key cluster configuration.
@@ -104,6 +109,9 @@ Default config references for different Kubernetes versions:
 - [Config for installing Kubernetes v1.32.x](../../../builtin/core/defaults/config/v1.32.yaml)
 - [Config for installing Kubernetes v1.33.x](../../../builtin/core/defaults/config/v1.33.yaml)
 - [Config for installing Kubernetes v1.34.x](../../../builtin/core/defaults/config/v1.34.yaml)
+- [Config for installing Kubernetes v1.35.x](../../../builtin/core/defaults/config/v1.35.yaml)
+- [Config for installing Kubernetes v1.36.x](../../../builtin/core/defaults/config/v1.36.yaml)
+- [Config for installing Kubernetes v1.37.x](../../../builtin/core/defaults/config/v1.37.yaml)
 
 For the complete configuration reference, see [Configuration Reference](../reference/config.md).
 
@@ -131,6 +139,7 @@ After the cluster is created, you can scale nodes according to business requirem
 
 - **Add Nodes**: Add new control plane, worker, or etcd nodes to an existing Kubernetes cluster. For detailed steps, see [Add Cluster Nodes](add-nodes.md).
 - **Delete Nodes**: Safely remove specified nodes from a Kubernetes cluster. For detailed steps, see [Delete Cluster Nodes](delete-nodes.md).
+- **Upgrade Cluster**: Upgrade the Kubernetes version of an existing cluster, and optionally etcd, the container runtime, the CNI plugin, and the StorageClass provisioner. For detailed steps, see [Upgrade Cluster](upgrade-cluster.md).
 
 ## Enable kubectl autocompletion
 

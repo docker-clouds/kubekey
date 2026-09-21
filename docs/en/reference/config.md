@@ -144,7 +144,8 @@ cluster_require:
     v3.28: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30"]
     v3.29: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32"]
     v3.30: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33"]
-    v3.31: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
+    v3.31: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35"]
+    v3.32: ["v1.34", "v1.35", "v1.36", "v1.37"]
 
   # Compatible Kubernetes version matrix by Cilium version
   cilium_allowed_versions:
@@ -154,13 +155,15 @@ cluster_require:
     "1.17": ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32"]
     "1.18": ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33"]
     "1.19": ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
+    "1.20": ["v1.33", "v1.34", "v1.35", "v1.36", "v1.37"]
 
   # Compatible Kubernetes version matrix by kube-ovn version
   kubeovn_allowed_versions:
     v1.12: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28"]
     v1.13: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28"]
-    v1.14: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
-    v1.15: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
+    v1.14: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35", "v1.36"]
+    v1.15: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35", "v1.36"]
+    v1.16: ["v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35", "v1.36"]
 
   # Minimum compatible etcd version matrix by Kubernetes version
   etcd_min_versions:
@@ -183,10 +186,12 @@ cluster_require:
     v1.33.3: v3.5.11-0
     v1.33.4: v3.5.11-0
     v1.33.5: v3.5.11-0
-    v1.33: v3.5.21-0
+    v1.33: v3.5.24-0
     v1.34.0: v3.5.21-0
     v1.34.1: v3.5.21-0
     v1.34: v3.5.24-0
+    v1.35: v3.5.24-0
+    v1.36: v3.5.24-0
 ```
 
 ### Parameter Descriptions
@@ -337,15 +342,15 @@ image_registry:
       {{- .image_registry.type | empty -}}
     ca_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
-      {{ .binary_dir }}/pki/root.crt
+      {{ .work_dir }}/pki/root.crt
       {{- end -}}
     cert_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
-      {{ .binary_dir }}/pki/image-registry-client.crt
+      {{ .work_dir }}/pki/image-registry-client.crt
       {{- end -}}
     key_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
-      {{ .binary_dir }}/pki/image-registry-client.key
+      {{ .work_dir }}/pki/image-registry-client.key
       {{- end -}}
 
   # Registry endpoint ports derived from image_registry.auth.registry and plain_http.
@@ -440,6 +445,28 @@ native:
   #   [hostname of the node being installed] -> corresponding node IP
   localDNS:
     - /etc/hosts
+  # OS packages installed on every node during initialization, declared per package
+  # manager with their real distribution package names
+  # Additional packages are appended automatically when required:
+  #   - nftables when kubernetes.kube_proxy.mode is "nftables"
+  #   - when the inventory defines a non-empty "nfs" group: nfs-kernel-server (deb)
+  #     or nfs-utils (rpm) on the nodes of that group, and nfs-common (deb) or
+  #     nfs-utils (rpm) on all other nodes
+  packages:
+    debs:
+      - socat
+      - conntrack
+      - ipset
+      - ebtables
+      - chrony
+      - ipvsadm
+    rpms:
+      - socat
+      - conntrack-tools
+      - ipset
+      - ebtables
+      - chrony
+      - ipvsadm
 ```
 
 ### Parameter Descriptions
@@ -452,6 +479,8 @@ native:
 | `native.nfs.share_dir` | NFS shared directories, used by nodes marked with the `nfs` role. |
 | `native.set_hostname` | Whether to automatically set the node hostname according to the inventory definition during installation. |
 | `native.localDNS` | List of local DNS resolution files (e.g., `/etc/hosts`), used to provide temporary domain name resolution during installation. |
+| `native.packages.debs` | Debian/Ubuntu packages installed on every node during initialization, using real `.deb` package names. `nftables` is appended automatically when `kubernetes.kube_proxy.mode` is `nftables`. When the inventory defines a non-empty `nfs` group, `nfs-kernel-server` is appended on the nodes of that group and `nfs-common` on all other nodes. |
+| `native.packages.rpms` | RHEL/CentOS packages installed on every node during initialization, using real RPM package names (e.g. `conntrack-tools`). `nftables` is appended automatically when `kubernetes.kube_proxy.mode` is `nftables`. When the inventory defines a non-empty `nfs` group, `nfs-utils` is appended on every node, as it provides both the NFS server and the NFS client. |
 
 ---
 
@@ -574,6 +603,20 @@ kubernetes:
       address: ""
       # Supported modes: ARP, BGP
       mode: ARP
+      # Environment variables for the kube-vip container, common to both ARP and BGP modes.
+      # Mode-specific env vars (e.g. bgp_* in BGP mode) are fixed in their respective manifest template.
+      env:
+        port: "6443"
+        vip_cidr: "32"
+        cp_enable: "true"
+        cp_namespace: kube-system
+        vip_ddns: "false"
+        # Whether kube-vip manages Service (type LoadBalancer) VIPs.
+        # Set to "false" when a separate Service VIP manager (e.g. MetalLB) is used,
+        # so kube-vip only manages the apiserver VIP.
+        svc_enable: "true"
+        lb_enable: "true"
+        lb_port: "6443"
       image:
         # kube-vip image registry
         registry: >-
@@ -600,7 +643,7 @@ kubernetes:
   certs:
     # There are three ways to provide the Kubernetes CA (Certificate Authority) files:
     # 1. kubeadm: Leave ca_cert and ca_key empty, and kubeadm will generate them automatically. These certificates are valid for 10 years and will not change.
-    # 2. kubekey: Set ca_cert to {{ .binary_dir }}/pki/ca.cert and ca_key to {{ .binary_dir }}/pki/ca.key.
+    # 2. kubekey: Set ca_cert to {{ .work_dir }}/pki/ca.cert and ca_key to {{ .work_dir }}/pki/ca.key.
     #    These certificates are generated by kubekey, valid for 10 years, and can be updated via `cert.ca_date`.
     # 3. Custom: Manually specify the absolute paths for ca_cert and ca_key to use your own CA files.
     #
@@ -674,6 +717,8 @@ kubernetes:
 | `kubernetes.control_plane_endpoint.local.address` | When using `local` mode, an external load balancer address can be specified for resolution only. |
 | `kubernetes.control_plane_endpoint.kube_vip.address` | Network interface name or IP bound by kube-vip. |
 | `kubernetes.control_plane_endpoint.kube_vip.mode` | kube-vip working mode: `ARP` or `BGP`. |
+| `kubernetes.control_plane_endpoint.kube_vip.env` | Environment variables passed to the kube-vip container, common to both ARP and BGP modes. |
+| `kubernetes.control_plane_endpoint.kube_vip.env.svc_enable` | Whether kube-vip manages Service (type LoadBalancer) VIPs. Set to `"false"` when using a separate Service VIP manager (e.g. MetalLB) alongside kube-vip. |
 | `kubernetes.control_plane_endpoint.kube_vip.image` | kube-vip container image configuration. |
 | `kubernetes.control_plane_endpoint.haproxy.address` | Address that HAProxy listens on the local loopback interface. |
 | `kubernetes.control_plane_endpoint.haproxy.health_port` | HAProxy health check port. |
@@ -787,6 +832,8 @@ cri:
         max-file: "{{ .kubernetes.kubelet.container_log_max_files | default 3  | toString | toJson }}"
       # Enable live-restore
       live-restore: true
+      # IP CIDR of the Docker bridge (docker0), e.g. 172.17.0.1/16
+      # bip: 172.17.0.1/16
       # Container exec options
       exec-opts:
         - "native.cgroupdriver={{ .cri.cgroup_driver | default \"systemd\" }}"
@@ -796,6 +843,10 @@ cri:
     # Policy for updating the containerd config file and systemd service when the runtime is already installed.
     # Empty (default): skip the update; "merge": merge with the existing config (node-side keys take precedence); "override": overwrite.
     config_policy: ""
+    # Download the statically linked containerd binary instead of the default dynamically linked one.
+    # Useful on older distros (e.g. Rocky Linux 8) whose glibc predates what recent containerd releases require.
+    # Only set this for a containerd_version that publishes a "containerd-static-*" release asset.
+    static_binary: false
     config:
       # containerd data root directory
       root: "{{ .cri.containerd.data_root | default \"/var/lib/containerd\" }}"
@@ -859,9 +910,11 @@ cri:
 | `cri.docker.daemon.log-opts.max-size` | Maximum size of a single container log file. |
 | `cri.docker.daemon.log-opts.max-file` | Number of old container log files to retain. |
 | `cri.docker.daemon.live-restore` | Whether to enable Docker live-restore. |
+| `cri.docker.daemon.bip` | IP CIDR of the Docker bridge (docker0), e.g. `172.17.0.1/16`. |
 | `cri.docker.daemon.exec-opts` | Docker exec options list, e.g., cgroup driver. |
 | `cri.containerd.config` | containerd configuration, mapped to `/etc/containerd/config.toml`. |
 | `cri.containerd.config_policy` | Policy for updating the containerd config file (`/etc/containerd/config.toml`) and systemd service when the runtime is already installed: empty (default) skips the update; `merge` merges with the existing config (node-side existing keys take precedence); `override` overwrites. Binary installation and certificate sync are not affected by this policy. |
+| `cri.containerd.static_binary` | Whether to download the statically linked containerd binary (`containerd-static-*`) instead of the default dynamically linked one. Useful on older distros whose glibc predates what recent containerd releases require. Requires the target containerd version to actually publish a static release asset. |
 | `cri.docker.daemon_policy` | Same as `cri.containerd.config_policy`, but applies to the Docker daemon (`/etc/docker/daemon.json`) and its systemd service. |
 | `cri.containerd.config.root` | containerd data persistence root directory. |
 | `cri.containerd.config.version` | containerd configuration file version. |
@@ -943,19 +996,19 @@ etcd:
   traffic_priority: false
   # CA certificate path
   ca_file: >-
-    {{ .binary_dir }}/pki/root.crt
+    {{ .work_dir }}/pki/root.crt
   # Server certificate path
   server_cert_file: >-
-    {{ .binary_dir }}/pki/etcd-{{ "{{ . }}" }}.crt
+    {{ .work_dir }}/pki/etcd-{{ "{{ . }}" }}.crt
   # Server private key path
   server_key_file: >-
-    {{ .binary_dir }}/pki/etcd-{{ "{{ . }}" }}.key
+    {{ .work_dir }}/pki/etcd-{{ "{{ . }}" }}.key
   # Client certificate path
   client_cert_file: >-
-    {{ .binary_dir }}/pki/etcd-client.crt
+    {{ .work_dir }}/pki/etcd-client.crt
   # Client private key path
   client_key_file: >-
-    {{ .binary_dir }}/pki/etcd-client.key
+    {{ .work_dir }}/pki/etcd-client.key
 ```
 
 ### Parameter Descriptions
@@ -1209,7 +1262,9 @@ download:
     # containerd binary package
     containerd: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
-      github.com/containerd/containerd/releases/download/{{ "{{ .version }}" }}/containerd-{{ "{{ .version | default \"\" | trimPrefix \"v\" }}" }}-linux-{{ "{{ .arch }}" }}.tar.gz
+      github.com/containerd/containerd/releases/download/{{ "{{ .version }}" }}/containerd-
+      {{- .cri.containerd.static_binary | default false | ternary "static-" "" -}}
+      {{ "{{ .version | default \"\" | trimPrefix \"v\" }}" }}-linux-{{ "{{ .arch }}" }}.tar.gz
     # runc binary
     runc: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
@@ -1403,54 +1458,54 @@ download:
         - docker.io/calico/dikastes:v3.29.7
         - docker.io/calico/node-driver-registrar:v3.29.7
         - quay.io/calico/pod2daemon-flexvol:v3.29.7
-      v3.30.5:
+      v3.30.7:
         - quay.io/tigera/operator:v1.38.9
-        - docker.io/calico/ctl:v3.30.5
-        - docker.io/calico/typha:v3.30.5
-        - quay.io/calico/node:v3.30.5
-        # - docker.io/calico/node-windows:v3.30.5
-        - docker.io/calico/cni:v3.30.5
-        # - docker.io/calico/cni-windows:v3.30.5
-        - docker.io/calico/csi:v3.30.5
-        - docker.io/calico/apiserver:v3.30.5
-        - docker.io/calico/kube-controllers:v3.30.5
-        - docker.io/calico/envoy-gateway:v3.30.5
-        - docker.io/calico/envoy-proxy:v3.30.5
-        - docker.io/calico/envoy-ratelimit:v3.30.5
-        - docker.io/calico/flannel-migration-controller:v3.30.5
+        - docker.io/calico/ctl:v3.30.7
+        - docker.io/calico/typha:v3.30.7
+        - quay.io/calico/node:v3.30.7
+        # - docker.io/calico/node-windows:v3.30.7
+        - docker.io/calico/cni:v3.30.7
+        # - docker.io/calico/cni-windows:v3.30.7
+        - docker.io/calico/csi:v3.30.7
+        - docker.io/calico/apiserver:v3.30.7
+        - docker.io/calico/kube-controllers:v3.30.7
+        - docker.io/calico/envoy-gateway:v3.30.7
+        - docker.io/calico/envoy-proxy:v3.30.7
+        - docker.io/calico/envoy-ratelimit:v3.30.7
+        - docker.io/calico/flannel-migration-controller:v3.30.7
         - docker.io/flannel/flannel:v0.24.4
-        - docker.io/calico/dikastes:v3.30.5
-        - docker.io/calico/node-driver-registrar:v3.30.5
-        - quay.io/calico/pod2daemon-flexvol:v3.30.5
-        - docker.io/calico/csi:v3.30.5
-        - docker.io/calico/key-cert-provisioner:v3.30.5
-        - docker.io/calico/goldmane:v3.30.5
-        - docker.io/calico/whisker:v3.30.5
-        - docker.io/calico/whisker-backend:v3.30.5
-      v3.31.3:
+        - docker.io/calico/dikastes:v3.30.7
+        - docker.io/calico/node-driver-registrar:v3.30.7
+        - quay.io/calico/pod2daemon-flexvol:v3.30.7
+        - docker.io/calico/csi:v3.30.7
+        - docker.io/calico/key-cert-provisioner:v3.30.7
+        - docker.io/calico/goldmane:v3.30.7
+        - docker.io/calico/whisker:v3.30.7
+        - docker.io/calico/whisker-backend:v3.30.7
+      v3.31.7:
         - quay.io/tigera/operator:v1.40.3
-        - quay.io/calico/ctl:v3.31.3
-        - docker.io/calico/typha:v3.31.3
-        - quay.io/calico/node:v3.31.3
-        # - docker.io/calico/node-windows:v3.31.3
-        - docker.io/calico/cni:v3.31.3
-        # - docker.io/calico/cni-windows:v3.31.3
-        - docker.io/calico/csi:v3.31.3
-        - docker.io/calico/apiserver:v3.31.3
-        - docker.io/calico/kube-controllers:v3.31.3
-        - docker.io/calico/envoy-gateway:v3.31.3
-        - docker.io/calico/envoy-proxy:v3.31.3
-        - docker.io/calico/envoy-ratelimit:v3.31.3
-        - docker.io/calico/flannel-migration-controller:v3.31.3
+        - quay.io/calico/ctl:v3.31.7
+        - docker.io/calico/typha:v3.31.7
+        - quay.io/calico/node:v3.31.7
+        # - docker.io/calico/node-windows:v3.31.7
+        - docker.io/calico/cni:v3.31.7
+        # - docker.io/calico/cni-windows:v3.31.7
+        - docker.io/calico/csi:v3.31.7
+        - docker.io/calico/apiserver:v3.31.7
+        - docker.io/calico/kube-controllers:v3.31.7
+        - docker.io/calico/envoy-gateway:v3.31.7
+        - docker.io/calico/envoy-proxy:v3.31.7
+        - docker.io/calico/envoy-ratelimit:v3.31.7
+        - docker.io/calico/flannel-migration-controller:v3.31.7
         - docker.io/flannel/flannel:v0.24.4
-        - docker.io/calico/dikastes:v3.31.3
-        - docker.io/calico/node-driver-registrar:v3.31.3
-        - quay.io/calico/pod2daemon-flexvol:v3.31.3
-        - docker.io/calico/csi:v3.31.3
-        - docker.io/calico/key-cert-provisioner:v3.31.3
-        - docker.io/calico/goldmane:v3.31.3
-        - docker.io/calico/whisker:v3.31.3
-        - docker.io/calico/whisker-backend:v3.31.3
+        - docker.io/calico/dikastes:v3.31.7
+        - docker.io/calico/node-driver-registrar:v3.31.7
+        - quay.io/calico/pod2daemon-flexvol:v3.31.7
+        - docker.io/calico/csi:v3.31.7
+        - docker.io/calico/key-cert-provisioner:v3.31.7
+        - docker.io/calico/goldmane:v3.31.7
+        - docker.io/calico/whisker:v3.31.7
+        - docker.io/calico/whisker-backend:v3.31.7
     cilium/cilium:
       "1.14.19":
         - quay.io/cilium/cilium:v1.14.19

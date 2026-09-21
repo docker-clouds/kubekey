@@ -17,10 +17,238 @@ limitations under the License.
 package tmpl
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"sigs.k8s.io/yaml"
 )
+
+// kubeVipVariable returns a variable map shaped like the real defaults for
+// kubernetes.control_plane_endpoint.kube_vip, plus the extra host/group
+// context the kubevip.ARP/BGP templates read directly (kube_vip_interface,
+// groups, hostvars).
+func kubeVipVariable() map[string]any {
+	return map[string]any{
+		"kube_vip_interface": "eth0",
+		"groups": map[string]any{
+			"kube_control_plane": []any{"node1"},
+		},
+		"hostvars": map[string]any{
+			"node1": map[string]any{
+				"internal_ipv4": "10.0.0.1",
+			},
+		},
+		"kubernetes": map[string]any{
+			"control_plane_endpoint": map[string]any{
+				"kube_vip": map[string]any{
+					"address": "192.168.0.1",
+					"mode":    "ARP",
+					"env": map[string]any{
+						"port":         "6443",
+						"vip_cidr":     "32",
+						"cp_enable":    "true",
+						"cp_namespace": "kube-system",
+						"vip_ddns":     "false",
+						"svc_enable":   "true",
+						"lb_enable":    "true",
+						"lb_port":      "6443",
+					},
+					"image": map[string]any{
+						"registry":   "docker.io",
+						"repository": "plndr/kube-vip",
+						"tag":        "v0.7.2",
+					},
+				},
+			},
+		},
+	}
+}
+
+func envValue(t *testing.T, pod map[string]any, name string) any {
+	t.Helper()
+	spec, ok := pod["spec"].(map[string]any)
+	assert.True(t, ok)
+	containers, ok := spec["containers"].([]any)
+	assert.True(t, ok)
+	container, ok := containers[0].(map[string]any)
+	assert.True(t, ok)
+	envs, ok := container["env"].([]any)
+	assert.True(t, ok)
+
+	for _, e := range envs {
+		entry, ok := e.(map[string]any)
+		assert.True(t, ok)
+		if entry["name"] == name {
+			return entry["value"]
+		}
+	}
+	t.Fatalf("env %q not found", name)
+
+	return nil
+}
+
+func renderKubeVipTemplate(t *testing.T, path string, variable map[string]any) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	assert.NoError(t, err)
+
+	rendered, err := Parse(variable, string(raw))
+	assert.NoError(t, err)
+
+	var pod map[string]any
+	assert.NoError(t, yaml.Unmarshal(rendered, &pod))
+
+	return pod
+}
+
+func TestKubeVipTemplatesRenderDefaults(t *testing.T) {
+	testcases := []struct {
+		name string
+		path string
+	}{
+		{name: "ARP", path: "../../../builtin/core/roles/kubernetes/pre-kubernetes/templates/kubevip/kubevip.ARP"},
+		{name: "BGP", path: "../../../builtin/core/roles/kubernetes/pre-kubernetes/templates/kubevip/kubevip.BGP"},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, svcEnable := range []string{"true", "false"} {
+				variable := kubeVipVariable()
+				variable["kubernetes"].(map[string]any)["control_plane_endpoint"].(map[string]any)["kube_vip"].(map[string]any)["env"].(map[string]any)["svc_enable"] = svcEnable
+
+				pod := renderKubeVipTemplate(t, tc.path, variable)
+
+				// common env, sourced from the configurable env map
+				assert.Equal(t, svcEnable, envValue(t, pod, "svc_enable"))
+				assert.Equal(t, "6443", envValue(t, pod, "port"))
+				assert.Equal(t, "32", envValue(t, pod, "vip_cidr"))
+				assert.Equal(t, "kube-system", envValue(t, pod, "cp_namespace"))
+				assert.Equal(t, "192.168.0.1", envValue(t, pod, "address"))
+			}
+		})
+	}
+
+	t.Run("ARP mode-specific env is fixed in the template", func(t *testing.T) {
+		pod := renderKubeVipTemplate(t, "../../../builtin/core/roles/kubernetes/pre-kubernetes/templates/kubevip/kubevip.ARP", kubeVipVariable())
+
+		assert.Equal(t, "true", envValue(t, pod, "vip_leaderelection"))
+		assert.Equal(t, "5", envValue(t, pod, "vip_leaseduration"))
+	})
+
+	t.Run("BGP mode-specific env is fixed in the template", func(t *testing.T) {
+		pod := renderKubeVipTemplate(t, "../../../builtin/core/roles/kubernetes/pre-kubernetes/templates/kubevip/kubevip.BGP", kubeVipVariable())
+
+		assert.Equal(t, "true", envValue(t, pod, "bgp_enable"))
+		assert.Equal(t, "65000", envValue(t, pod, "bgp_as"))
+		assert.Equal(t, "local", envValue(t, pod, "lb_fwdmethod"))
+		assert.Equal(t, ":2112", envValue(t, pod, "prometheus_server"))
+	})
+}
+
+// downloadArtifactURLTemplate reads the real 10-download.yaml defaults file
+// and returns the raw artifact_url template string for the given key
+// (e.g. "docker_registry", "containerd"), along with the sibling
+// download.cn_host value templates commonly need.
+func downloadArtifactURLTemplate(t *testing.T, key string) (tmplStr string, cnHost any) {
+	t.Helper()
+
+	raw, err := os.ReadFile("../../../builtin/core/roles/defaults/defaults/main/10-download.yaml")
+	assert.NoError(t, err)
+
+	var defaults map[string]any
+	assert.NoError(t, yaml.Unmarshal(raw, &defaults))
+
+	download, ok := defaults["download"].(map[string]any)
+	assert.True(t, ok)
+	artifactURL, ok := download["artifact_url"].(map[string]any)
+	assert.True(t, ok)
+	tmplStr, ok = artifactURL[key].(string)
+	assert.True(t, ok)
+
+	return tmplStr, download["cn_host"]
+}
+
+// TestDockerRegistryArtifactURLUsesMirrorHost renders the real docker_registry
+// artifact_url template the same way pkg/modules/http_get_file does: first as
+// the defaults file's own self-referential template, then through tpl with the
+// download item. docker-registry-*.tgz is a KubeKey-repackaged asset that only
+// exists on the cn_host mirror, so the resulting URL must route through
+// cn_host regardless of zone; falling back to a bare "https://docker.io/..."
+// host for non-cn zones 404s (docker.io redirects to www.docker.com).
+func TestDockerRegistryArtifactURLUsesMirrorHost(t *testing.T) {
+	tmplStr, cnHost := downloadArtifactURLTemplate(t, "docker_registry")
+
+	for _, zone := range []string{"", "cn"} {
+		variable := map[string]any{
+			"zone": zone,
+			"download": map[string]any{
+				"cn_host": cnHost,
+			},
+		}
+
+		rendered, err := Parse(variable, tmplStr)
+		assert.NoError(t, err)
+
+		final, err := Parse(map[string]any{"version": "2.8.3", "arch": "amd64"}, string(rendered))
+		assert.NoError(t, err)
+
+		assert.Equal(t, "https://kubekey.pek3b.qingstor.com/docker.io/registry/2.8.3/docker-registry-2.8.3-linux-amd64.tgz", string(final))
+	}
+}
+
+// TestContainerdArtifactURLStaticBinary renders the real containerd artifact_url
+// template the same way pkg/modules/http_get_file does: first as the defaults
+// file's own self-referential template (resolving cri.containerd.static_binary
+// and zone), then through tpl with the download item (version/arch). When
+// cri.containerd.static_binary is true the URL must point at the
+// "containerd-static-*" release asset instead of the default dynamically
+// linked "containerd-*" asset, since the dynamic build requires a newer glibc
+// than some supported distros (e.g. Rocky Linux 8) ship.
+func TestContainerdArtifactURLStaticBinary(t *testing.T) {
+	tmplStr, cnHost := downloadArtifactURLTemplate(t, "containerd")
+
+	testcases := []struct {
+		name         string
+		staticBinary bool
+		expected     string
+	}{
+		{
+			name:         "dynamic binary by default",
+			staticBinary: false,
+			expected:     "https://github.com/containerd/containerd/releases/download/v2.3.4/containerd-2.3.4-linux-amd64.tar.gz",
+		},
+		{
+			name:         "static binary when opted in",
+			staticBinary: true,
+			expected:     "https://github.com/containerd/containerd/releases/download/v2.3.4/containerd-static-2.3.4-linux-amd64.tar.gz",
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			variable := map[string]any{
+				"zone": "",
+				"download": map[string]any{
+					"cn_host": cnHost,
+				},
+				"cri": map[string]any{
+					"containerd": map[string]any{
+						"static_binary": tc.staticBinary,
+					},
+				},
+			}
+
+			rendered, err := Parse(variable, tmplStr)
+			assert.NoError(t, err)
+
+			final, err := Parse(map[string]any{"version": "v2.3.4", "arch": "amd64"}, string(rendered))
+			assert.NoError(t, err)
+
+			assert.Equal(t, tc.expected, string(final))
+		})
+	}
+}
 
 func TestParseBool(t *testing.T) {
 	testcases := []struct {

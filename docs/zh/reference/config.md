@@ -142,7 +142,8 @@ cluster_require:
     v3.28: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30"]
     v3.29: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32"]
     v3.30: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33"]
-    v3.31: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
+    v3.31: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35"]
+    v3.32: ["v1.34", "v1.35", "v1.36", "v1.37"]
 
   # 各 Kubernetes 版本允许的 Cilium 版本
   cilium_allowed_versions:
@@ -152,13 +153,15 @@ cluster_require:
     "1.17": ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32"]
     "1.18": ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33"]
     "1.19": ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
+    "1.20": ["v1.33", "v1.34", "v1.35", "v1.36"]
 
   # 各 Kubernetes 版本允许的 kube-ovn 版本
   kubeovn_allowed_versions:
     v1.12: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28"]
     v1.13: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28"]
-    v1.14: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
-    v1.15: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34"]
+    v1.14: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35", "v1.36"]
+    v1.15: ["v1.23", "v1.24", "v1.25", "v1.26", "v1.27", "v1.28", "v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35", "v1.36", "v1.37"]
+    v1.16: ["v1.29", "v1.30", "v1.31", "v1.32", "v1.33", "v1.34", "v1.35", "v1.36", "v1.37"]
 
   # 各 Kubernetes 版本要求的 etcd 最低版本
   etcd_min_versions:
@@ -181,10 +184,12 @@ cluster_require:
     v1.33.3: v3.5.11-0
     v1.33.4: v3.5.11-0
     v1.33.5: v3.5.11-0
-    v1.33: v3.5.21-0
+    v1.33: v3.5.24-0
     v1.34.0: v3.5.21-0
     v1.34.1: v3.5.21-0
     v1.34: v3.5.24-0
+    v1.35: v3.5.24-0
+    v1.36: v3.5.24-0
 ```
 
 ### 参数说明
@@ -335,15 +340,15 @@ image_registry:
       {{- .image_registry.type | empty -}}
     ca_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
-      {{ .binary_dir }}/pki/root.crt
+      {{ .work_dir }}/pki/root.crt
       {{- end -}}
     cert_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
-      {{ .binary_dir }}/pki/image-registry-client.crt
+      {{ .work_dir }}/pki/image-registry-client.crt
       {{- end -}}
     key_file: >-
       {{- if .groups.image_registry | default list | empty | not -}}
-      {{ .binary_dir }}/pki/image-registry-client.key
+      {{ .work_dir }}/pki/image-registry-client.key
       {{- end -}}
 
   # 镜像仓库端口，默认会根据 image_registry.auth.registry 和 plain_http 自动派生。
@@ -438,6 +443,26 @@ native:
   #   [当前安装节点的主机名] -> 对应节点 IP
   localDNS:
     - /etc/hosts
+  # 初始化时在每个节点安装的操作系统软件包，按包管理器分别声明，使用发行版真实包名
+  # 以下软件包会在满足条件时自动追加：
+  #   - kubernetes.kube_proxy.mode 为 "nftables" 时追加 nftables
+  #   - inventory 中定义了非空的 "nfs" 组时：该组节点追加 nfs-kernel-server（deb）
+  #     或 nfs-utils（rpm），其余节点追加 nfs-common（deb）或 nfs-utils（rpm）
+  packages:
+    debs:
+      - socat
+      - conntrack
+      - ipset
+      - ebtables
+      - chrony
+      - ipvsadm
+    rpms:
+      - socat
+      - conntrack-tools
+      - ipset
+      - ebtables
+      - chrony
+      - ipvsadm
 ```
 
 ### 参数说明
@@ -450,6 +475,8 @@ native:
 | `native.nfs.share_dir` | NFS 共享目录，供标记了 `nfs` 角色的节点使用。 |
 | `native.set_hostname` | 安装时是否根据 inventory 中的定义自动设置节点主机名。 |
 | `native.localDNS` | 本地 DNS 解析文件列表（如 `/etc/hosts`），用于在安装期间提供临时域名解析。 |
+| `native.packages.debs` | 初始化时在每个节点安装的 Debian/Ubuntu 软件包，使用真实 `.deb` 包名。当 `kubernetes.kube_proxy.mode` 为 `nftables` 时会自动追加 `nftables`；当 inventory 中定义了非空的 `nfs` 组时，该组节点追加 `nfs-kernel-server`，其余节点追加 `nfs-common`。 |
+| `native.packages.rpms` | 初始化时在每个节点安装的 RHEL/CentOS 软件包，使用真实 RPM 包名（如 `conntrack-tools`）。当 `kubernetes.kube_proxy.mode` 为 `nftables` 时会自动追加 `nftables`；当 inventory 中定义了非空的 `nfs` 组时，所有节点追加 `nfs-utils`（该包同时提供 NFS 服务端与客户端）。 |
 
 ---
 
@@ -572,6 +599,20 @@ kubernetes:
       address: ""
       # 支持的模式：ARP, BGP
       mode: ARP
+      # kube-vip 容器的环境变量，ARP 和 BGP 模式共用。
+      # 模式专属的环境变量（例如 BGP 模式下的 bgp_*）固定在对应的清单模板中。
+      env:
+        port: "6443"
+        vip_cidr: "32"
+        cp_enable: "true"
+        cp_namespace: kube-system
+        vip_ddns: "false"
+        # kube-vip 是否管理 Service（LoadBalancer 类型）VIP。
+        # 当同时使用独立的 Service VIP 管理组件（例如 MetalLB）时，设为 "false"，
+        # 使 kube-vip 仅负责 apiserver VIP。
+        svc_enable: "true"
+        lb_enable: "true"
+        lb_port: "6443"
       image:
         # kube-vip 镜像仓库
         registry: >-
@@ -598,7 +639,7 @@ kubernetes:
   certs:
     # 提供 Kubernetes CA 文件有三种方式：
     # 1. kubeadm：将 ca_cert 和 ca_key 留空，kubeadm 会自动生成。有效期 10 年，不可更改。
-    # 2. kubekey：将 ca_cert 设置为 {{ .binary_dir }}/pki/ca.cert，ca_key 设置为 {{ .binary_dir }}/pki/ca.key。
+    # 2. kubekey：将 ca_cert 设置为 {{ .work_dir }}/pki/ca.cert，ca_key 设置为 {{ .work_dir }}/pki/ca.key。
     #    这些证书由 kubekey 生成，有效期 10 年，可通过 cert.ca_date 更新。
     # 3. 自定义：手动指定 ca_cert 和 ca_key 的绝对路径以使用您自己的 CA 文件。
     #
@@ -672,6 +713,8 @@ kubernetes:
 | `kubernetes.control_plane_endpoint.local.address` | 使用 `local` 模式时，可指定外部负载均衡器地址仅用于解析。 |
 | `kubernetes.control_plane_endpoint.kube_vip.address` | kube-vip 绑定的网卡名称或 IP。 |
 | `kubernetes.control_plane_endpoint.kube_vip.mode` | kube-vip 的工作模式：`ARP` 或 `BGP`。 |
+| `kubernetes.control_plane_endpoint.kube_vip.env` | 传递给 kube-vip 容器的环境变量，ARP 和 BGP 模式共用。 |
+| `kubernetes.control_plane_endpoint.kube_vip.env.svc_enable` | kube-vip 是否管理 Service（LoadBalancer 类型）VIP。当同时使用独立的 Service VIP 管理组件（例如 MetalLB）时设为 `"false"`。 |
 | `kubernetes.control_plane_endpoint.kube_vip.image` | kube-vip 容器镜像配置。 |
 | `kubernetes.control_plane_endpoint.haproxy.address` | HAProxy 在本机回环接口上监听的地址。 |
 | `kubernetes.control_plane_endpoint.haproxy.health_port` | HAProxy 健康检查端口。 |
@@ -785,6 +828,8 @@ cri:
         max-file: "{{ .kubernetes.kubelet.container_log_max_files | default 3  | toString | toJson }}"
       # 是否启用 live-restore
       live-restore: true
+      # Docker 网桥（docker0）的 IP 网段，例如 172.17.0.1/16
+      # bip: 172.17.0.1/16
       # 容器 exec 选项
       exec-opts:
         - "native.cgroupdriver={{ .cri.cgroup_driver | default \"systemd\" }}"
@@ -794,6 +839,10 @@ cri:
     # 已安装 containerd 时，更新配置文件（/etc/containerd/config.toml）与 systemd 服务的策略。
     # 空（默认）：跳过更新；"merge"：与现有配置合并（节点侧已有键优先）；"override"：覆盖。
     config_policy: ""
+    # 下载静态链接的 containerd 二进制包，而非默认的动态链接版本。
+    # 适用于 glibc 版本低于最新 containerd 发行版要求的旧发行版（如 Rocky Linux 8）。
+    # 仅当目标 containerd_version 确实发布了 "containerd-static-*" 产物时才应开启此项。
+    static_binary: false
     config:
       # containerd 数据根目录
       root: "{{ .cri.containerd.data_root | default \"/var/lib/containerd\" }}"
@@ -857,9 +906,11 @@ cri:
 | `cri.docker.daemon.log-opts.max-size` | 单个容器日志文件的最大大小。 |
 | `cri.docker.daemon.log-opts.max-file` | 保留的旧容器日志文件数量。 |
 | `cri.docker.daemon.live-restore` | 是否启用 Docker live-restore。 |
+| `cri.docker.daemon.bip` | Docker 网桥（docker0）的 IP 网段，例如 `172.17.0.1/16`。 |
 | `cri.docker.daemon.exec-opts` | Docker exec 选项列表，例如 cgroup 驱动。 |
 | `cri.containerd.config` | containerd 配置，映射为 `/etc/containerd/config.toml`。 |
 | `cri.containerd.config_policy` | 已安装 containerd 时，更新配置文件（/etc/containerd/config.toml）与 systemd 服务的策略：空（默认）跳过更新；`merge` 与现有配置合并（节点侧已有键优先）；`override` 覆盖。该策略不影响二进制安装与证书同步。 |
+| `cri.containerd.static_binary` | 是否下载静态链接的 containerd 二进制包（`containerd-static-*`），而非默认的动态链接版本。适用于 glibc 版本低于最新 containerd 发行版要求的旧发行版。要求目标 containerd 版本确实发布了静态构建的产物。 |
 | `cri.docker.daemon_policy` | 与 `cri.containerd.config_policy` 相同，但作用于 Docker daemon（/etc/docker/daemon.json）及其 systemd 服务。 |
 | `cri.containerd.config.root` | containerd 数据持久化根目录。 |
 | `cri.containerd.config.version` | containerd 配置文件版本。 |
@@ -941,19 +992,19 @@ etcd:
   traffic_priority: false
   # CA 证书路径
   ca_file: >-
-    {{ .binary_dir }}/pki/root.crt
+    {{ .work_dir }}/pki/root.crt
   # 服务端证书路径
   server_cert_file: >-
-    {{ .binary_dir }}/pki/etcd-{{ "{{ . }}" }}.crt
+    {{ .work_dir }}/pki/etcd-{{ "{{ . }}" }}.crt
   # 服务端私钥路径
   server_key_file: >-
-    {{ .binary_dir }}/pki/etcd-{{ "{{ . }}" }}.key
+    {{ .work_dir }}/pki/etcd-{{ "{{ . }}" }}.key
   # 客户端证书路径
   client_cert_file: >-
-    {{ .binary_dir }}/pki/etcd-client.crt
+    {{ .work_dir }}/pki/etcd-client.crt
   # 客户端私钥路径
   client_key_file: >-
-    {{ .binary_dir }}/pki/etcd-client.key
+    {{ .work_dir }}/pki/etcd-client.key
 ```
 
 ### 参数说明
@@ -1207,7 +1258,9 @@ download:
     # containerd 二进制包
     containerd: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
-      github.com/containerd/containerd/releases/download/{{ "{{ .version }}" }}/containerd-{{ "{{ .version | default \"\" | trimPrefix \"v\" }}" }}-linux-{{ "{{ .arch }}" }}.tar.gz
+      github.com/containerd/containerd/releases/download/{{ "{{ .version }}" }}/containerd-
+      {{- .cri.containerd.static_binary | default false | ternary "static-" "" -}}
+      {{ "{{ .version | default \"\" | trimPrefix \"v\" }}" }}-linux-{{ "{{ .arch }}" }}.tar.gz
     # runc 二进制
     runc: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
@@ -1401,54 +1454,54 @@ download:
         - docker.io/calico/dikastes:v3.29.7
         - docker.io/calico/node-driver-registrar:v3.29.7
         - quay.io/calico/pod2daemon-flexvol:v3.29.7
-      v3.30.5:
+      v3.30.7:
         - quay.io/tigera/operator:v1.38.9
-        - docker.io/calico/ctl:v3.30.5
-        - docker.io/calico/typha:v3.30.5
-        - quay.io/calico/node:v3.30.5
-        # - docker.io/calico/node-windows:v3.30.5
-        - docker.io/calico/cni:v3.30.5
-        # - docker.io/calico/cni-windows:v3.30.5
-        - docker.io/calico/csi:v3.30.5
-        - docker.io/calico/apiserver:v3.30.5
-        - docker.io/calico/kube-controllers:v3.30.5
-        - docker.io/calico/envoy-gateway:v3.30.5
-        - docker.io/calico/envoy-proxy:v3.30.5
-        - docker.io/calico/envoy-ratelimit:v3.30.5
-        - docker.io/calico/flannel-migration-controller:v3.30.5
+        - docker.io/calico/ctl:v3.30.7
+        - docker.io/calico/typha:v3.30.7
+        - quay.io/calico/node:v3.30.7
+        # - docker.io/calico/node-windows:v3.30.7
+        - docker.io/calico/cni:v3.30.7
+        # - docker.io/calico/cni-windows:v3.30.7
+        - docker.io/calico/csi:v3.30.7
+        - docker.io/calico/apiserver:v3.30.7
+        - docker.io/calico/kube-controllers:v3.30.7
+        - docker.io/calico/envoy-gateway:v3.30.7
+        - docker.io/calico/envoy-proxy:v3.30.7
+        - docker.io/calico/envoy-ratelimit:v3.30.7
+        - docker.io/calico/flannel-migration-controller:v3.30.7
         - docker.io/flannel/flannel:v0.24.4
-        - docker.io/calico/dikastes:v3.30.5
-        - docker.io/calico/node-driver-registrar:v3.30.5
-        - quay.io/calico/pod2daemon-flexvol:v3.30.5
-        - docker.io/calico/csi:v3.30.5
-        - docker.io/calico/key-cert-provisioner:v3.30.5
-        - docker.io/calico/goldmane:v3.30.5
-        - docker.io/calico/whisker:v3.30.5
-        - docker.io/calico/whisker-backend:v3.30.5
-      v3.31.3:
+        - docker.io/calico/dikastes:v3.30.7
+        - docker.io/calico/node-driver-registrar:v3.30.7
+        - quay.io/calico/pod2daemon-flexvol:v3.30.7
+        - docker.io/calico/csi:v3.30.7
+        - docker.io/calico/key-cert-provisioner:v3.30.7
+        - docker.io/calico/goldmane:v3.30.7
+        - docker.io/calico/whisker:v3.30.7
+        - docker.io/calico/whisker-backend:v3.30.7
+      v3.31.7:
         - quay.io/tigera/operator:v1.40.3
-        - quay.io/calico/ctl:v3.31.3
-        - docker.io/calico/typha:v3.31.3
-        - quay.io/calico/node:v3.31.3
-        # - docker.io/calico/node-windows:v3.31.3
-        - docker.io/calico/cni:v3.31.3
-        # - docker.io/calico/cni-windows:v3.31.3
-        - docker.io/calico/csi:v3.31.3
-        - docker.io/calico/apiserver:v3.31.3
-        - docker.io/calico/kube-controllers:v3.31.3
-        - docker.io/calico/envoy-gateway:v3.31.3
-        - docker.io/calico/envoy-proxy:v3.31.3
-        - docker.io/calico/envoy-ratelimit:v3.31.3
-        - docker.io/calico/flannel-migration-controller:v3.31.3
+        - quay.io/calico/ctl:v3.31.7
+        - docker.io/calico/typha:v3.31.7
+        - quay.io/calico/node:v3.31.7
+        # - docker.io/calico/node-windows:v3.31.7
+        - docker.io/calico/cni:v3.31.7
+        # - docker.io/calico/cni-windows:v3.31.7
+        - docker.io/calico/csi:v3.31.7
+        - docker.io/calico/apiserver:v3.31.7
+        - docker.io/calico/kube-controllers:v3.31.7
+        - docker.io/calico/envoy-gateway:v3.31.7
+        - docker.io/calico/envoy-proxy:v3.31.7
+        - docker.io/calico/envoy-ratelimit:v3.31.7
+        - docker.io/calico/flannel-migration-controller:v3.31.7
         - docker.io/flannel/flannel:v0.24.4
-        - docker.io/calico/dikastes:v3.31.3
-        - docker.io/calico/node-driver-registrar:v3.31.3
-        - quay.io/calico/pod2daemon-flexvol:v3.31.3
-        - docker.io/calico/csi:v3.31.3
-        - docker.io/calico/key-cert-provisioner:v3.31.3
-        - docker.io/calico/goldmane:v3.31.3
-        - docker.io/calico/whisker:v3.31.3
-        - docker.io/calico/whisker-backend:v3.31.3
+        - docker.io/calico/dikastes:v3.31.7
+        - docker.io/calico/node-driver-registrar:v3.31.7
+        - quay.io/calico/pod2daemon-flexvol:v3.31.7
+        - docker.io/calico/csi:v3.31.7
+        - docker.io/calico/key-cert-provisioner:v3.31.7
+        - docker.io/calico/goldmane:v3.31.7
+        - docker.io/calico/whisker:v3.31.7
+        - docker.io/calico/whisker-backend:v3.31.7
     cilium/cilium:
       "1.14.19":
         - quay.io/cilium/cilium:v1.14.19
