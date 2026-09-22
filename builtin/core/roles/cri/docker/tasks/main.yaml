@@ -22,7 +22,10 @@
   block:
     - name: Docker | Check if Docker is installed on the system
       ignore_errors: true
-      command: docker version --format '{{ .Client.Version }}' 2>/dev/null || true
+      # timeout: 残留的旧 dockerd 可能卡在 activating（如 systemd socket 激活后
+      # 等 containerd），docker version 会无限等待挂死整个部署。30s 超时后
+      # stdout 为空 → 版本比对不匹配 → 触发下方重装+重启服务，自动收敛
+      command: timeout 30 docker version --format '{{ .Client.Version }}' 2>/dev/null || true
       register: docker_install_version
     - name: Docker | Install and configure Docker if not present or version mismatch
       when: or (.docker_install_version.error | empty | not) (.docker_install_version.stdout | ne .cri.docker_version)
