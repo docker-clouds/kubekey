@@ -36,7 +36,7 @@
       apt-get update
       # Install missing packages
       if [ -n "$PKGS_TO_INSTALL" ]; then
-        apt install -y $PKGS_TO_INSTALL
+        NEEDRESTART_MODE=a apt install -y $PKGS_TO_INSTALL
       fi
       # Restore original APT sources
       rm -rf /etc/apt/sources.list.d
@@ -46,7 +46,7 @@
       # No local ISO found, using default repositories
       apt-get update
       if [ -n "$PKGS_TO_INSTALL" ]; then
-        apt install -y $PKGS_TO_INSTALL
+        NEEDRESTART_MODE=a apt install -y $PKGS_TO_INSTALL
       fi
     fi
   when: .current_host_type | trim | eq "ubuntu"
@@ -84,7 +84,7 @@
       yum clean all && yum makecache
       # Install missing packages
       if [ -n "$PKGS_TO_INSTALL" ]; then
-        yum install -y $PKGS_TO_INSTALL
+        NEEDRESTART_MODE=a yum install -y $PKGS_TO_INSTALL
       fi
       # Restore original YUM repositories
       rm -rf /etc/yum.repos.d
@@ -92,7 +92,7 @@
     else
       # No local ISO found, using default repositories
       if [ -n "$PKGS_TO_INSTALL" ]; then
-        yum install -y $PKGS_TO_INSTALL
+        NEEDRESTART_MODE=a yum install -y $PKGS_TO_INSTALL
       fi
     fi
   when: .current_host_type | trim | eq "centos"
