@@ -10,11 +10,11 @@ RUN apt update -qq \
     && apt upgrade -y \
     && apt install -y --no-install-recommends libatomic1 gcc-12-base $BUILD_TOOLS
 
-# dump AFTER upgrade so registered versions match the archive versions fetched below
-RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
-
 WORKDIR /package
 COPY packages.yaml .
+
+# dump AFTER upgrade, INSIDE workdir so the yq append uses the same file
+RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
 
 COPY --from=mikefarah/yq:4.11.1 /usr/bin/yq /usr/bin/yq
 RUN yq eval "${PKGS}" packages.yaml >> packages.list \
