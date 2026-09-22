@@ -2,14 +2,14 @@ FROM ubuntu:20.04 as ubuntu2004
 ARG TARGETARCH
 ARG DIR=ubuntu-20.04-${TARGETARCH}-debs
 ARG PKGS=".common[],.debs[]"
-ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage gcc make pciutils"
+ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 RUN apt update -qq \
     && apt upgrade -y \
-    && apt install -y --no-install-recommends $BUILD_TOOLS
+    && apt install -y --no-install-recommends libatomic1 gcc-10-base $BUILD_TOOLS
 
 # dump AFTER upgrade so registered versions match the archive versions fetched below
 RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list

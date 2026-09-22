@@ -3,12 +3,12 @@ ARG TARGETARCH
 ARG OS_RELEASE=jammy
 ARG DIR=ubuntu-22.04-${TARGETARCH}-debs
 ARG PKGS=".common[],.debs[]"
-ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage gcc make pciutils"
+ARG BUILD_TOOLS="apt-transport-https software-properties-common ca-certificates curl wget gnupg dpkg-dev genisoimage"
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update -qq \
     && apt upgrade -y \
-    && apt install -y --no-install-recommends $BUILD_TOOLS
+    && apt install -y --no-install-recommends libatomic1 gcc-12-base $BUILD_TOOLS
 
 # dump AFTER upgrade so registered versions match the archive versions fetched below
 RUN dpkg --get-selections | grep -v deinstall | cut -f1 | cut -d ':' -f1 > packages.list
