@@ -161,7 +161,21 @@
     # 其容器（registry 实证 Exited 137），而 dockerd 运行中对外部 containerd 死容器
     # 的 restart manager 恢复不可靠；dockerd 重启路径则可靠 —— daemon 启动时会
     # 恢复 restart=always 的容器，registry 随之回归
+    #
+    # 注意 systemd 语义：stop docker 会经 Requires= 把 docker-registry 一并停止
+    # （ExecStop=compose down 删容器），但 start docker **不会**反向传播 start
+    # docker-registry —— 必须显式 restart registry 并等 443 就绪，否则 kubeadm
+    # 拉控制面镜像时 connection refused（journal 实证 13:06/13:09 两轮）
     systemctl is-active --quiet docker.service && systemctl restart docker.service || true
+    if systemctl is-enabled --quiet docker-registry.service 2>/dev/null; then
+      systemctl restart docker-registry.service
+      for i in $(seq 1 30); do
+        timeout 2 bash -c '</dev/tcp/127.0.0.1/443' 2>/dev/null && exit 0
+        sleep 2
+      done
+      echo "ERROR: registry 443 not ready after containerd/docker restart" >&2
+      exit 1
+    fi
 
 # Note: when upgrade.cri is false the whole `cri` role is skipped at the
 # playbook level (upgrade_cluster.yaml), so containerd is left untouched
