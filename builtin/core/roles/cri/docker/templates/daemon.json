@@ -1,4 +1,14 @@
 {{- $daemon := .cri.docker.daemon }}
+{{- /* docker 29 起默认启用 containerd image store（containerd-snapshotter=true），
+       此模式下 dockerd 不启动内置 containerd，而是直连 /run/containerd/containerd.sock
+       —— 即 k8s 的 containerd。后果：k8s containerd 每次部署重启（config_policy:
+       override）时 dockerd 事件流 EOF，registry 容器被连坐 SIGKILL，且 1.7 API 线
+       对 docker 29 的请求回 Task not implemented / time namespace 拒绝，容器无法
+       拉起。显式关闭，强制 dockerd 回经典模式（内置 containerd + overlay2），
+       与 k8s containerd 生命周期彻底解耦（troubleshooting.md §27）。
+       注意：切换 image store 会丢弃 /var/lib/docker 旧镜像——registry 镜像由
+       部署流程每次重新 load，无影响。 */}}
+{{- $_ := set $daemon "features" (dict "containerd-snapshotter" false) }}
 {{- if .cri.registry.mirrors }}
 {{- $_ := set $daemon "registry-mirrors" .cri.registry.mirrors }}
 {{- end }}
