@@ -21,7 +21,17 @@
 
 - name: DockerRegistry | Load registry image into Docker
   command: |
-    docker load -i /opt/docker-registry/{{ .image_registry.docker_registry_version }}/docker-registry-{{ .image_registry.docker_registry_version }}-linux-{{ .binary_type }}.tgz
+    # artifact 里的镜像 tar 可能带 mirror 前缀 tag（如 docker.m.daocloud.io/library/registry:2.8.3，
+    # 由镜像源拉取时的 rewrite 决定），而 docker-compose 模板期望 registry:{version}。
+    # 不 retag 的话 compose 会认为镜像缺失转而在线 pull，离线节点 i/o timeout 死循环
+    # （曾致 DockerRegistry | Wait 任务挂 5 分钟失败，见 troubleshooting.md）。
+    LOAD_OUT=$(docker load -i /opt/docker-registry/{{ .image_registry.docker_registry_version }}/docker-registry-{{ .image_registry.docker_registry_version }}-linux-{{ .binary_type }}.tgz)
+    echo "$LOAD_OUT"
+    SRC_TAG=$(echo "$LOAD_OUT" | awk '/Loaded image:/{print $3; exit}')
+    WANT_TAG="registry:{{ .image_registry.docker_registry_version }}"
+    if [ -n "$SRC_TAG" ] && [ "$SRC_TAG" != "$WANT_TAG" ]; then
+      docker tag "$SRC_TAG" "$WANT_TAG"
+    fi
 
 - name: DockerRegistry | Synchronize registry certificate to remote host
   copy:
