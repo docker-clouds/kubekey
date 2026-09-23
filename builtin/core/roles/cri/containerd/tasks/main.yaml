@@ -157,6 +157,11 @@
   when: or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
   command: |
     systemctl daemon-reload && systemctl restart containerd.service && systemctl enable containerd.service
+    # docker（若在运行，如 image_registry 节点）跟随重启：containerd 重启会 SIGKILL
+    # 其容器（registry 实证 Exited 137），而 dockerd 运行中对外部 containerd 死容器
+    # 的 restart manager 恢复不可靠；dockerd 重启路径则可靠 —— daemon 启动时会
+    # 恢复 restart=always 的容器，registry 随之回归
+    systemctl is-active --quiet docker.service && systemctl restart docker.service || true
 
 # Note: when upgrade.cri is false the whole `cri` role is skipped at the
 # playbook level (upgrade_cluster.yaml), so containerd is left untouched
