@@ -4,9 +4,15 @@ After=docker.service systemd-networkd.service systemd-resolved.service
 Requires=docker.service
 
 [Service]
-Type=simple
-ExecStart=/usr/local/bin/docker-compose -p registry -f /opt/docker-registry/{{ .image_registry.docker_registry_version }}/docker-compose.yml {{ if and (.image_registry.ha_vip | empty | not) (.groups.image_registry | len | lt 1) }}-f /opt/keepalived/{{ .image_registry.keepalived_version }}/docker-compose.yaml{{ end }} up
+# oneshot + up -d（detached）：compose 前台 up 作为主进程时，containerd 重启会
+# 终止 registry 容器 → compose 主进程退出 → systemd 触发 ExecStop（compose down）
+# 连容器带网络删光 → kubeadm init 拉控制面镜像 443 refused（journal 实证：
+# push 完成 35 秒后 cri/containerd override 重启 containerd，registry 即死）。
+# detached 后容器由 dockerd 托管（restart: always），containerd 重启后
+# dockerd watcher 自动重连并拉回容器 —— registry 自愈，不再连锅端。
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/docker-compose -p registry -f /opt/docker-registry/{{ .image_registry.docker_registry_version }}/docker-compose.yml {{ if and (.image_registry.ha_vip | empty | not) (.groups.image_registry | len | lt 1) }}-f /opt/keepalived/{{ .image_registry.keepalived_version }}/docker-compose.yaml{{ end }} up -d
 ExecStop=/usr/local/bin/docker-compose -p registry down
-Restart=on-failure
 [Install]
 WantedBy=multi-user.target
