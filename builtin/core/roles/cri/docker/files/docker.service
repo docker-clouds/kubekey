@@ -10,7 +10,14 @@ Type=notify
 # the default is not to use systemd for cgroups because the delegate issues still
 # exists and systemd currently does not support the cgroup feature set required
 # for containers run by docker
-ExecStart=/usr/local/bin/dockerd  --containerd=/run/containerd/containerd.sock
+# 不挂外部 containerd（--containerd=）：dockerd 使用内置 containerd 实例
+# （socket 在 /run/docker/containerd/，与 k8s 的 /run/containerd/ 互不干扰）。
+# 挂外部 socket 会让 registry 容器跑在 k8s 的 containerd 上——该 containerd
+# 每次部署（config_policy: override）都会重启，registry 连坐死亡；且
+# docker 29.x + containerd 1.7.x 组合经外部 socket 创建容器会报
+# "runc create failed: namespace {\"time\" \"\"} does not exist"（time namespace
+# spec 被 1.7 API 线拒绝）。解耦后两者生命周期独立，互不影响。
+ExecStart=/usr/local/bin/dockerd
 ExecReload=/bin/kill -s HUP $MAINPID
 TimeoutSec=0
 RestartSec=2
