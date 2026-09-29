@@ -29,8 +29,10 @@ debs:
   - apt-transport-https
   - ca-certificates
   - dnsutils
+  - dmidecode
   - gcc
   - gnupg-agent
+  - lshw
   - make
   - nfs-common
   - nfs-kernel-server
