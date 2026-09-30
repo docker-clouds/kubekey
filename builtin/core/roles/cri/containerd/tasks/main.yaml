@@ -47,7 +47,10 @@
 - name: Containerd | Synchronize image registry TLS certificates to the remote node
   block:
     - name: Containerd | Copy image registry CA certificate to the remote node
-      when: .image_registry.auth.ca_file | fileExists
+      when:
+      - .image_registry.auth.registry | empty | not
+      - .image_registry.auth.registry | splitList "/" | first | ne "hub.kubesphere.com.cn"
+      - .image_registry.auth.ca_file | fileExists
       copy:
         src: >-
           {{ .image_registry.auth.ca_file }}
@@ -55,6 +58,8 @@
           /etc/containerd/certs.d/{{ .image_registry.auth.registry | splitList "/" | first }}/ca.crt
     - name: Containerd | Copy image registry client certificate to the remote node
       when:
+      - .image_registry.auth.registry | empty | not
+      - .image_registry.auth.registry | splitList "/" | first | ne "hub.kubesphere.com.cn"
       - .image_registry.auth.cert_file | fileExists
       copy:
         src: >-
@@ -63,6 +68,8 @@
           /etc/containerd/certs.d/{{ .image_registry.auth.registry | splitList "/" | first }}/client.crt
     - name: Containerd | Copy image registry client key to the remote node
       when:
+      - .image_registry.auth.registry | empty | not
+      - .image_registry.auth.registry | splitList "/" | first | ne "hub.kubesphere.com.cn"
       - .image_registry.auth.key_file | fileExists
       copy:
         src: >-
@@ -82,16 +89,16 @@
       template:
         src: config.toml
         dest: /etc/containerd/config.toml
-    # ── volcorch 规范化：ascend runtime + 额外 registry（数据源: config spec
-    #    .extra_registries，由部署侧脚本从站点文件注入；
-    #    空默认兜底在 defaults/main/03-extra-registries.yaml）──
+    # ── volcorch 规范化：额外 registry（数据源: config spec .extra_registries，
+    #    由部署侧脚本从站点文件注入；空默认兜底在 defaults/main/03-extra-registries.yaml）──
     # 设计约束（勿改回"存在即跳过"式的幂等检查）：
-    #   - 任意位置、任意格式的既有 ascend 段一律删除后重写（自愈手工编辑产生的错误格式，
-    #     典型事故：BinaryName 放在段顶层而非 options 下，containerd 静默忽略导致 vNPU 硬切失效）
     #   - 与声明 registry 重复的 mirror/tls 表一并删除（防止 TOML 重复定义使 containerd 拒绝启动）
     #   - 全部改动收在 # BEGIN/END volcorch-managed 标记块内，备份写入 config.toml.volcorch-bak
-    #   - 重启后用 `containerd config dump` 校验生效配置，不通过则整个 play 失败（fail-fast）
-    - name: Containerd | Normalize config.toml (ascend runtime + extra registries)
+    # Note: the ascend runtime config is owned by the Ascend-Docker-Runtime installer
+    #   (npu-driver playbook calls `--install --install-scene=containerd` which registers
+    #   it). kk neither injects nor strips ascend sections - single source of truth,
+    #   no dual-write conflict with the installer.
+    - name: Containerd | Normalize config.toml (extra registries)
       command: |
         set -e
         CFG=/etc/containerd/config.toml
@@ -111,8 +118,8 @@
         {
           if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) { buf = buf $0 "\n"; next }
           if ($0 ~ /^[ \t]*\[/) {
-            drop = (index($0, ".runtimes.ascend]") > 0 || index($0, ".runtimes.ascend.") > 0)
-            if (!drop) for (i = 1; i <= n; i++) if (index($0, m1[i]) > 0 || index($0, m2[i]) > 0) { drop = 1; break }
+            drop = 0
+            for (i = 1; i <= n; i++) if (index($0, m1[i]) > 0 || index($0, m2[i]) > 0) { drop = 1; break }
             if (drop) { buf = ""; skip = 1; next }
             flushbuf(); printf "%s\n", $0; skip = 0; next
           }
@@ -125,11 +132,8 @@
         # BEGIN volcorch-managed
         # volcorch-managed CRI config. DO NOT edit manually - redeploy normalizes this block.
         # Declare registries in runtime/clusters/<cluster>/extra-registries.yaml (site volume).
-        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.ascend]
-          runtime_type = "io.containerd.runc.v2"
-          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.ascend.options]
-            BinaryName = "/usr/local/bin/ascend-docker-runtime"
-            SystemdCgroup = true
+        # The ascend runtime config is NOT in this block - it is managed by the
+        # Ascend-Docker-Runtime installer (see npu-driver playbook).
         {{- range .extra_registries | default list }}
         [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{ .registry }}"]
           endpoint = ["{{ .endpoint | default (printf "http://%s" .registry) }}"]
@@ -140,14 +144,82 @@
         {{- end }}
         # END volcorch-managed
         VOLCORCH_EOF
-    - name: Containerd | Ensure ascend-docker-runtime symlink when driver is present
-      command: |
-        if [ -x /usr/local/Ascend/Ascend-Docker-Runtime/ascend-docker-runtime ]; then
-          ln -sf /usr/local/Ascend/Ascend-Docker-Runtime/ascend-docker-runtime /usr/local/bin/ascend-docker-runtime
-          echo "symlink ensured: /usr/local/bin/ascend-docker-runtime"
-        else
-          echo "skip: Ascend driver not present on this node"
-        fi
+
+# containerd v2 reads the registry settings from /etc/containerd/certs.d/<host>/hosts.toml,
+# because it dropped registry.configs.<host>.tls and refuses to combine registry.mirrors with
+# registry.config_path (see templates/config.toml). The mirrors, the insecure registries and
+# the TLS material are therefore written there as well. A v1 node keeps using the
+# configuration generated above and ignores these files.
+#
+# The four places a registry can be configured in are merged into one item per registry, so
+# that templates/hosts.toml renders every hosts.toml of the node. Later sources win when the
+# same registry is configured twice, which is the order they had when each of them wrote its
+# own file. The dictionary is turned into a list because a task cannot iterate a mapping.
+# The v2 layout is written whenever containerd is (re)configured, by the same condition the
+# `Configure containerd` block above uses, so that config.toml and the hosts.toml files it points
+# at are never out of step: a re-run that leaves config.toml alone leaves these files alone too.
+#
+# hosts.toml is always rendered by kk and overwrites whatever the node had before, regardless of
+# `config_policy`. Key-by-key merging is not an option here: a hosts.toml holds one registry and
+# spells its mirrors as [host.<url>] tables, so the two sets would have to be interleaved into a
+# single file. To keep this simple, kk owns the hosts.toml files outright.
+- name: Containerd | Write the registry configuration for containerd v2
+  when:
+    - .cri.containerd_version | default "" | hasPrefix "v2."
+    - or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
+  loop: >-
+    {{- $hosts := dict -}}
+    {{- /* cri.registry.mirrors: every mirror is tried before registry-1.docker.io. */ -}}
+    {{- if .cri.registry.mirrors | empty | not -}}
+    {{- $_ := set $hosts "docker.io" (dict "server" "https://registry-1.docker.io" "mirrors" .cri.registry.mirrors) -}}
+    {{- end -}}
+    {{- /* cri.registry.insecure_registries: these endpoints serve no TLS. */ -}}
+    {{- $insecureScheme := "http" -}}
+    {{- range .cri.registry.insecure_registries -}}
+    {{- $_ := set $hosts . (dict "server" (printf "%s://%s" $insecureScheme .) "skip_verify" true) -}}
+    {{- end -}}
+    {{- /* image_registry: the certificate and key are taken from the registry directory. */ -}}
+    {{- $registryHost := .image_registry.auth.registry | splitList "/" | first -}}
+    {{- if and ($registryHost | empty | not) (ne $registryHost "hub.kubesphere.com.cn") -}}
+    {{- $skipTLS := true -}}
+    {{- if hasKey .image_registry.auth "skip_tls_verify" -}}
+    {{- $skipTLS = .image_registry.auth.skip_tls_verify | toBool -}}
+    {{- end -}}
+    {{- $cfg := dict "server" (printf "%s://%s" (.image_registry.auth.plain_http | default false | ternary "http" "https") $registryHost) "skip_verify" $skipTLS -}}
+    {{- if .image_registry.auth.ca_file | default "" | fileExists -}}
+    {{- $_ := set $cfg "ca" (printf "/etc/containerd/certs.d/%s/ca.crt" $registryHost) -}}
+    {{- end -}}
+    {{- if and (.image_registry.auth.cert_file | default "" | fileExists) (.image_registry.auth.key_file | default "" | fileExists) -}}
+    {{- $_ := set $cfg "client_cert" (printf "/etc/containerd/certs.d/%s/client.crt" $registryHost) -}}
+    {{- $_ := set $cfg "client_key" (printf "/etc/containerd/certs.d/%s/client.key" $registryHost) -}}
+    {{- end -}}
+    {{- $_ := set $hosts $registryHost $cfg -}}
+    {{- end -}}
+    {{- /* cri.registry.auths: the file paths of the entry are reused as they are. */ -}}
+    {{- range .cri.registry.auths | default list -}}
+    {{- $skipTLS := true -}}
+    {{- if hasKey . "skip_tls_verify" -}}
+    {{- $skipTLS = .skip_tls_verify | toBool -}}
+    {{- end -}}
+    {{- $cfg := dict "server" (printf "https://%s" (.registry | splitList "/" | first)) "skip_verify" $skipTLS -}}
+    {{- if .ca_file -}}
+    {{- $_ := set $cfg "ca" .ca_file -}}
+    {{- end -}}
+    {{- if .cert_file -}}
+    {{- $_ := set $cfg "client_cert" .cert_file -}}
+    {{- $_ := set $cfg "client_key" (.key_file | default .cert_file) -}}
+    {{- end -}}
+    {{- $_ := set $hosts (.registry | splitList "/" | first) $cfg -}}
+    {{- end -}}
+    {{- /* leave the dictionary key with the item, it is the destination directory. */ -}}
+    {{- range $host, $cfg := $hosts -}}
+    {{- $_ := set $cfg "host" $host -}}
+    {{- end -}}
+    {{- $hosts | values | toJson -}}
+  template:
+    src: hosts.toml
+    dest: /etc/containerd/certs.d/{{ .item.host }}/hosts.toml
+
 - name: Containerd | Deploy the containerd systemd service file
   when: or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
   copy:
@@ -166,12 +238,8 @@
 # Note: when upgrade.cri is false the whole `cri` role is skipped at the
 # playbook level (upgrade_cluster.yaml), so containerd is left untouched
 # during a Kubernetes-only upgrade.
-
-- name: Containerd | Fail fast unless ascend runtime is effective in dumped config
-  when: or (.containerd_install_version.error | empty | not) (.containerd_install_version.stdout | contains (printf " %s " .cri.containerd_version) | not) (.cri.containerd.config_policy | empty | not)
-  command: |
-    if ! containerd config dump 2>/dev/null | awk '/runtimes\.ascend\.options\]/{f=1; next} f && /^\[/{f=0} f && /BinaryName/{ok=1} END{exit(ok?0:1)}'; then
-      echo "FATAL: effective containerd config lacks BinaryName under runtimes.ascend.options."
-      echo "       /etc/containerd/config.toml was likely hand-edited; backup at /etc/containerd/config.toml.volcorch-bak"
-      exit 1
-    fi
+#
+# Note: the ascend-runtime config check moved to the npu-driver playbook
+# (runs on NPU nodes only). kk no longer injects the ascend runtime config,
+# so non-NPU nodes have no ascend section and a global check here would
+# fail them.

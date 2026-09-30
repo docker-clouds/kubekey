@@ -42,7 +42,6 @@ precheck 集群安装前，对集群节点进行检查是否满足集群安装�
 - **双栈网络支持检查**: 当配置双栈网络时，验证 Kubernetes 版本是否支持（v1.20.0+）
 - **网络插件检查**: 验证配置的网络插件是否在支持列表中
 - **网络地址空间检查**: 确保节点上可用的网络地址空间足够容纳配置的最大 Pod 数量
-- **Hybridnet 版本检查**: 当使用 Hybridnet 网络插件时，验证 Kubernetes 版本是否满足要求（v1.16.0+）
 **etcd_precheck**: etcd 集群检查，包括：
 - **部署类型校验**：校验 etcd 的部署类型（internal 或 external），并在 external 模式下确保 etcd 组不为空且节点数量为奇数
 - **磁盘 IO 性能检查**：通过 fio 工具对 etcd 数据盘进行写入延迟测试，确保磁盘同步延迟（如 WAL fsync）满足集群要求
@@ -54,6 +53,8 @@ precheck 集群安装前，对集群节点进行检查是否满足集群安装�
 - **NFS 服务器数量检查**: 验证集群中只能有一个 NFS 服务器节点，确保 NFS 服务部署的唯一性
 **image_registry_precheck**: 镜像仓库检查，包括：
 - **镜像仓库必要软件检查**: 需检查 `docker_version` 和 `dockercompose_version` 均已配置且不为空。镜像仓库通过 docker_compose 进行安装，缺少必要软件会导致安装失败。
+
+> **按分类跳过 / 筛选 precheck**：`kk create cluster` 同样支持 `--skip-tags` / `--tags` 过滤 precheck 子类别（precheck 角色内嵌于创建流程，其子类按 cri / os / cni 等打标签）。例如 `--skip-tags cri` 跳过容器运行时检查但保留其余检查；`--tags` 为白名单、会限制整个 playbook，因此关闭某一类建议用 `--skip-tags`。详见 [precheck 按分类筛选](precheck.md#按分类筛选检查)。
 
 ## init
 
@@ -73,7 +74,7 @@ install 阶段是 KubeKey 的核心安装阶段，负责在集群节点上实际
 **install etcd**: 为 `etcd` 组中的节点安装etcd。  
 **install cri**: 为 `k8s_cluster` 组中的节点安装cri。目前支持两种CRI：docker，containerd。  
 **kubernetes_install**: 为 `k8s_cluster` 组中的节点安装kubernetes。  
-**install helm**: 为已安装好的kubernetes集群安装额外的helm 应用。包含：CNI（calico，cilium，flannel，hybridnet，kubeovn，multus）
+**install helm**: 为已安装好的kubernetes集群安装额外的helm 应用。包含：CNI（calico，cilium，flannel，kubeovn，multus）
 
 
 ## post_hook

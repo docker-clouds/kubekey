@@ -112,7 +112,7 @@ cluster_require:
     - rocky
     - '"rocky"'
   # 支持的网络插件
-  require_network_plugin: ['calico', 'flannel', 'cilium', 'hybridnet', 'kube-ovn']
+  require_network_plugin: ['calico', 'flannel', 'cilium', 'kubeovn']
   # 最低支持的 Kubernetes 版本
   kube_version_min_required: v1.23.0
   # 每个控制平面节点的最低内存要求（MB）
@@ -622,8 +622,9 @@ kubernetes:
         # kube-vip 镜像标签
         tag: v0.7.2
     haproxy:
-      # 节点 "lo"（回环）接口上的 IP 地址
-      address: 127.0.0.1
+      # 本地 haproxy 监听回环地址（127.0.0.1 和 ::1），只服务本节点。
+      # worker 节点将 control_plane_endpoint 在 /etc/hosts 中解析为 127.0.0.1/::1，
+      # 通过本机 haproxy 访问 API server。
       # HAProxy 健康检查端口
       health_port: 8081
       image:
@@ -716,7 +717,6 @@ kubernetes:
 | `kubernetes.control_plane_endpoint.kube_vip.env` | 传递给 kube-vip 容器的环境变量，ARP 和 BGP 模式共用。 |
 | `kubernetes.control_plane_endpoint.kube_vip.env.svc_enable` | kube-vip 是否管理 Service（LoadBalancer 类型）VIP。当同时使用独立的 Service VIP 管理组件（例如 MetalLB）时设为 `"false"`。 |
 | `kubernetes.control_plane_endpoint.kube_vip.image` | kube-vip 容器镜像配置。 |
-| `kubernetes.control_plane_endpoint.haproxy.address` | HAProxy 在本机回环接口上监听的地址。 |
 | `kubernetes.control_plane_endpoint.haproxy.health_port` | HAProxy 健康检查端口。 |
 | `kubernetes.control_plane_endpoint.haproxy.image` | HAProxy 容器镜像配置。 |
 | `kubernetes.certs.ca_cert` | 自定义 Kubernetes CA 证书路径（留空则使用 kubeadm/kubekey 生成）。 |
@@ -736,7 +736,7 @@ kubernetes:
 ```yaml
 cni:
   # 要使用的 CNI 插件类型
-  # 指定要为集群安装的网络插件。支持：calico, cilium, flannel, hybridnet, kubeovn, other
+  # 指定要为集群安装的网络插件。支持：calico, cilium, flannel, kubeovn, other
   type: calico
   # 集群 Pod 的完整 IP 地址池。支持 IPv4、IPv6 及双栈
   pod_cidr: 10.233.64.0/18
@@ -764,13 +764,54 @@ cni:
 
 | 参数 | 说明 |
 |------|------|
-| `cni.type` | 集群网络插件类型，可选 `calico`、`cilium`、`flannel`、`hybridnet`、`kubeovn`、`other`。 |
+| `cni.type` | 集群网络插件类型，可选 `calico`、`cilium`、`flannel`、`kubeovn`、`other`。 |
 | `cni.pod_cidr` | 整个集群 Pod 网络的 CIDR 网段。 |
 | `cni.ipv4_mask_size` | 为每个节点划分的 Pod IPv4 子网掩码长度。例如在 `/18` 大网段中使用 `/24` 掩码，每个节点可获得约 256 个 Pod IP。 |
 | `cni.ipv6_mask_size` | 为每个节点划分的 Pod IPv6 子网掩码长度。 |
 | `cni.service_cidr` | 整个集群 Service 网络的 CIDR 网段。 |
 | `cni.multi_cni` | 是否启用多 CNI 支持。`multus` 表示启用 Multus，`none` 表示不启用。 |
 | `cni.multus.image` | Multus CNI 容器镜像的配置（registry、repository、tag）。 |
+
+### 双栈（IPv4/IPv6）配置
+
+KubeKey 支持标准的 Kubernetes 双栈网络，可按以下步骤配置双栈集群。
+
+1. 将 `cni.pod_cidr` 与 `cni.service_cidr` 同时设置为两个地址族，IPv4 在前：
+
+   ```yaml
+   cni:
+     pod_cidr: 10.233.64.0/18,fd00:10:244::/56
+     service_cidr: 10.233.0.0/18,fd00:10:96::/112
+     ipv4_mask_size: 24
+     ipv6_mask_size: 64
+   ```
+
+   两个字段都必须是 1~2 个合法 CIDR：空值、超过两个地址族，以及任何非 CIDR 的写法（例如只写 IP 不写掩码）都会在安装前被拒绝。
+
+2. 在 inventory 中为每个节点同时配置两个地址族的地址，使 kubelet 能够下发 `--node-ip=<IPv4>,<IPv6>`：
+
+   ```yaml
+   hosts:
+     node1:
+       internal_ipv4: 172.16.0.3
+       internal_ipv6: fd85::3
+   ```
+
+   所有位置都必须保持 IPv4 在前。`kube-apiserver` 的 `--advertise-address` 仅支持单地址族，因此仍通告 IPv4 地址，而 Service 网段同时承载两个地址族。
+
+   节点地址（`internal_ipv4` / `internal_ipv6`）、`cni.pod_cidr` 与 `cni.service_cidr` 三者的地址族必须一致。当两个地址都已定义时该节点视为双栈节点，当 `cni.pod_cidr` 列出两个地址族时该集群视为双栈集群，因此双栈集群要求每个节点同时配置两个地址，单栈集群则要求只配置其中一个。在仅 IPv4 的集群中为节点配置 `internal_ipv6` 会被拒绝：kubelet 会把 `--node-ip` 的每一项都作为 `InternalIP` 上报，该节点因此会通告一个集群路由并未覆盖的 IPv6 地址。
+
+3. 选择支持双栈的 CNI。KubeKey 会依据 `cni.pod_cidr` 推导每个内置 CNI 需要服务的地址族：
+
+   | CNI | 配置方式 |
+   |-----|----------|
+   | `calico` | 无需 KubeKey 侧接线：tigera-operator 会读取 `kubeadm-config` ConfigMap 中的 `podSubnet`（由 `cni.pod_cidr` 渲染而来），并据此自动为每个地址族创建 IP 池（同时默认启用 IPv6 节点地址探测）。 |
+   | `cilium` | `ipv4.enabled` / `ipv6.enabled` 以及 `ipam.clusterPoolIPv4PodCIDRList` / `clusterPoolIPv6PodCIDRList`。 |
+   | `flannel` | `podCidr` 与 `podCidrv6`。 |
+   | `kubeovn` | `networking.NET_STACK: dual_stack`，配合 `dual_stack.POD_CIDR` 与 `dual_stack.SVC_CIDR`。 |
+   | `spiderpool` | `ipam.enableIPv4` / `ipam.enableIPv6`。 |
+
+> **限制**：集群创建完成后无法修改 Pod 与 Service 网段（这是 Kubernetes 本身的限制），因此已存在的单栈集群无法就地转换为双栈，双栈集群需要重新创建。
 
 ---
 
@@ -1075,7 +1116,7 @@ dns:
       repository: >-
         coredns
       # tag: v1.11.1
-    # 自定义 hosts 条目
+    # 自定义 hosts 条目（格式：IP 域名）。集群会自动合并 image_registry 与 NFS 域名解析
     dns_etc_hosts: []
     # DNS 区域匹配配置
     zone_configs:
@@ -1141,7 +1182,7 @@ dns:
 | `dns.nodelocaldns.image` | NodeLocalDNS 容器镜像配置。 |
 | `dns.coredns.ip` | CoreDNS 集群服务 IP，通常取自 Service CIDR 的第 3 个地址。 |
 | `dns.coredns.image` | CoreDNS 容器镜像配置。 |
-| `dns.coredns.dns_etc_hosts` | 向 CoreDNS 注入的自定义 `/etc/hosts` 格式条目。 |
+| `dns.coredns.dns_etc_hosts` | 向 CoreDNS 注入的自定义 `/etc/hosts` 格式条目。集群会自动合并 image_registry 与 NFS 域名解析。 |
 | `dns.coredns.zone_configs` | CoreDNS Corefile 的区域配置列表，可定义匹配的域、缓存、重写、转发等规则。 |
 | `dns.coredns.zone_configs[].zones` | 该区域规则匹配的 DNS 域及端口列表。 |
 | `dns.coredns.zone_configs[].additional_configs` | 附加的 CoreDNS 插件指令列表（如 `errors`、`ready`、`prometheus`、`loop`、`reload`、`loadbalance`）。 |
@@ -1305,10 +1346,6 @@ download:
     kubeovn: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
       kubeovn.github.io/kube-ovn/kube-ovn-{{ "{{ .version }}" }}.tgz
-    # Helm Chart 包：Hybridnet
-    hybridnet: >-
-      {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
-      github.com/alibaba/hybridnet/releases/download/helm-chart-{{ "{{ .version }}" }}/hybridnet-{{ "{{ .version }}" }}.tgz
     # Helm Chart 包：OpenEBS LocalPV Provisioner
     localpv_provisioner: >-
       {{- .zone | eq "cn" | ternary (tpl "https://{{ .download.cn_host}}/" .) "https://" -}}
@@ -1589,9 +1626,6 @@ download:
       v0.27.4:
         - ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1
         - ghcr.io/flannel-io/flannel:v0.27.4
-    hybridnet/hybridnet:
-      0.6.8:
-        - docker.io/hybridnetdev/hybridnet:v0.8.8
     kubeovn/kube-ovn:
       v1.13.15:
         - docker.io/kubeovn/kube-ovn:v1.13.15

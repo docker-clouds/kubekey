@@ -377,7 +377,7 @@ func (r *Result) convertCNI(cluster *Cluster) map[string]any {
 	switch n.Plugin {
 	case "":
 		return nil
-	case "calico", "cilium", "flannel", "kubeovn", "hybridnet":
+	case "calico", "cilium", "flannel", "kubeovn":
 		cni["type"] = n.Plugin
 	default:
 		r.warnf("network.plugin %q has no v4 cni.type equivalent, use \"other\" and configure it manually", n.Plugin)
@@ -435,7 +435,7 @@ func (r *Result) convertCNI(cluster *Cluster) map[string]any {
 	for _, p := range []struct {
 		name string
 		cfg  map[string]any
-	}{{"flannel", n.Flannel}, {"kubeovn", n.Kubeovn}, {"hybridnet", n.Hybridnet}} {
+	}{{"flannel", n.Flannel}, {"kubeovn", n.Kubeovn}} {
 		if len(p.cfg) > 0 {
 			r.warnf("network.%s has no direct v4 equivalent; review and configure it manually", p.name)
 		}
@@ -461,14 +461,37 @@ func (r *Result) convertDNS(cluster *Cluster) map[string]any {
 	}
 
 	d3 := cluster.Spec.DNS
+	// dns.coredns.dns_etc_hosts is honoured as a list of host lines. It can be
+	// supplied two ways and is normalised to a []any so the CoreDNS /
+	// NodeLocalDNS templates, which concat it with the auto-generated hosts,
+	// always receive a slice rather than a bare string:
+	//   - v4 dns.coredns.dns_etc_hosts (list) -> preserved as-is
+	//   - v3 dns.dnsEtcHosts (string)         -> wrapped into a single element
+	var etcHosts []any
+	if d3.DNSEtcHosts != "" {
+		etcHosts = append(etcHosts, d3.DNSEtcHosts)
+	}
+	if raw, ok := d3.CoreDNS["dns_etc_hosts"]; ok {
+		switch v := raw.(type) {
+		case []any:
+			etcHosts = append(etcHosts, v...)
+		case string:
+			if v != "" {
+				etcHosts = append(etcHosts, v)
+			}
+		default:
+			r.warnf("dns.coredns.dns_etc_hosts must be a string or a list of strings; ignored")
+		}
+		delete(d3.CoreDNS, "dns_etc_hosts")
+	}
+	if len(etcHosts) > 0 {
+		setNested(dns, etcHosts, "coredns", "dns_etc_hosts")
+	}
 	if len(d3.CoreDNS) > 0 {
 		r.warnf("dns.coredns advanced settings (additionalConfigs/externalZones/rewriteBlock/upstreamDNSServers) have no direct v4 equivalent; migrate them to dns.coredns.zone_configs manually")
 	}
 	if len(d3.NodeLocalDNS) > 0 {
 		r.warnf("dns.nodelocaldns.externalZones have no direct v4 equivalent; migrate them manually")
-	}
-	if d3.DNSEtcHosts != "" {
-		setNested(dns, d3.DNSEtcHosts, "coredns", "dns_etc_hosts")
 	}
 	if d3.NodeEtcHosts != "" {
 		r.warnf("dns.nodeEtcHosts has no direct v4 equivalent; review node /etc/hosts handling manually")

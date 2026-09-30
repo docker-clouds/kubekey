@@ -49,12 +49,10 @@
 
 # systemd-networkd does not re-read .network files at runtime automatically.
 # Reload it so the config takes effect now.
-# 注意（§29）: Ubuntu 20.04（systemd 245，Atlas ARM 镜像）的 networkd unit 无
-# ExecReload 定义，systemctl reload 报 "Job type reload is not applicable" exit 3
-# （22.04 有 networkctl reload、24.04 的 systemd 255 对无 ExecReload 自动回退，
-# 故仅 20.04 节点炸）。kill -HUP 主进程 = networkd 原生 reload 信号（20.04 时代
-# unit 的 ExecReload 即 kill -HUP $MAINPID），三版本行为统一，不重启进程、不动
-# 接口。失败仍响亮报错（不加 || true 掩盖）。
+# Note: `systemctl reload` fails on systemd < 246 (e.g. Ubuntu 20.04/245) which
+# lacks ExecReload on the networkd unit. Send SIGHUP to the main process instead:
+# it is networkd's native reload signal, uniform across systemd versions, and
+# never restarts the daemon or touches managed interfaces.
 - name: Network | Reload systemd-networkd to apply the configuration
   when: .systemd_networkd_ActiveState.stdout | eq "active"
   command: systemctl kill --signal=HUP --kill-who=main systemd-networkd

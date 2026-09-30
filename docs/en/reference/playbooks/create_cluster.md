@@ -42,7 +42,6 @@ The `precheck` phase verifies that cluster nodes meet the installation requireme
 - **Dual-stack support check**: When dual-stack networking is configured, verify that the Kubernetes version supports it (v1.20.0+)
 - **Network plugin check**: Verify that the configured network plugin is in the supported list
 - **Network address space check**: Ensure that available network address space on the node is sufficient to accommodate the configured maximum Pod count
-- **Hybridnet version check**: When using the Hybridnet network plugin, verify that the Kubernetes version meets the requirement (v1.16.0+)
 **etcd_precheck**: etcd cluster checks, including:
 - **Deployment type validation**: Validate the etcd deployment type (`internal` or `external`); in `external` mode, ensure that the etcd group is not empty and that the node count is odd
 - **Disk IO performance check**: Use the `fio` tool to test write latency on the etcd data disk, ensuring that disk sync latency (e.g., WAL fsync) meets cluster requirements
@@ -54,6 +53,8 @@ The `precheck` phase verifies that cluster nodes meet the installation requireme
 - **NFS server count check**: Verify that there is only one NFS server node in the cluster, ensuring uniqueness of the NFS service deployment
 **image_registry_precheck**: Image registry checks, including:
 - **Required software check**: Verify that both `docker_version` and `dockercompose_version` are configured and not empty. The image registry is installed via docker-compose; missing required software will cause installation failure.
+
+> **Skip / filter precheck by category**: `kk create cluster` also supports `--skip-tags` / `--tags` to filter precheck subcategories (the precheck role is embedded in the create flow and its sub-roles are tagged by category such as `cri`, `os`, `cni`). For example `--skip-tags cri` skips the container-runtime check while keeping the rest; `--tags` is a whitelist that restricts the whole playbook, so prefer `--skip-tags` to disable a single category. See [precheck filtering by category](precheck.md#filtering-by-category).
 
 ## init
 
@@ -73,7 +74,7 @@ The `install` phase is KubeKey's core installation phase, responsible for actual
 **install etcd**: Install etcd for nodes in the `etcd` group.  
 **install cri**: Install the container runtime (CRI) for nodes in the `k8s_cluster` group. Currently supports two CRIs: `docker` and `containerd`.  
 **kubernetes_install**: Install Kubernetes for nodes in the `k8s_cluster` group.  
-**install helm**: Install additional Helm applications for the installed Kubernetes cluster, including: CNI (`calico`, `cilium`, `flannel`, `hybridnet`, `kubeovn`, `multus`)
+**install helm**: Install additional Helm applications for the installed Kubernetes cluster, including: CNI (`calico`, `cilium`, `flannel`, `kubeovn`, `multus`)
 
 ## post_hook
 
