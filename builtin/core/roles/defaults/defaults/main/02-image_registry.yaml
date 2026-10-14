@@ -53,8 +53,10 @@ image_registry:
       {{- end -}}
 
   # Registry endpoint ports derived from image_registry.auth.registry and plain_http.
+  # Ports are a property of the registry ENDPOINT, not of whether we deploy one:
+  # external registries (type empty + explicit auth.registry) derive them too.
   http_port: >-
-    {{- if and (.image_registry.type | empty | not) (.image_registry.auth.registry | empty | not) (.image_registry.auth.plain_http | default false) -}}
+    {{- if and (.image_registry.auth.registry | empty | not) (.image_registry.auth.plain_http | default false) -}}
       {{- $hostPart := .image_registry.auth.registry | splitList "/" | first -}}
       {{- $port := $hostPart | splitList ":" | last -}}
       {{- if and (ne $port $hostPart) (ne $port "") -}}
@@ -64,7 +66,7 @@ image_registry:
       {{- end -}}
     {{- end -}}
   https_port: >-
-    {{- if and (.image_registry.type | empty | not) (.image_registry.auth.registry | empty | not) (not (.image_registry.auth.plain_http | default false)) -}}
+    {{- if and (.image_registry.auth.registry | empty | not) (not (.image_registry.auth.plain_http | default false)) -}}
       {{- $hostPart := .image_registry.auth.registry | splitList "/" | first -}}
       {{- $port := $hostPart | splitList ":" | last -}}
       {{- if and (ne $port $hostPart) (ne $port "") -}}
