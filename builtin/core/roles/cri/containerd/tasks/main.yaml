@@ -137,6 +137,11 @@
         {{- range .extra_registries | default list }}
         [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{ .registry }}"]
           endpoint = ["{{ .endpoint | default (printf "http://%s" .registry) }}"]
+        {{- if .username }}
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ .registry }}".auth]
+          username = "{{ .username }}"
+          password = "{{ .password }}"
+        {{- end }}
         {{- if .insecure_skip_verify }}
         [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ .registry }}".tls]
           insecure_skip_verify = true
